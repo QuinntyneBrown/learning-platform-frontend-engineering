@@ -42,22 +42,30 @@ module.exports = defineConfig([
         'error',
         { type: 'attribute', prefix: 'cw', style: 'camelCase' },
       ],
+      // Elements (cw-card), plus attribute components on native elements (button[cwButton]).
       '@angular-eslint/component-selector': [
         'error',
-        { type: 'element', prefix: 'cw', style: 'kebab-case' },
+        [
+          { type: 'element', prefix: 'cw', style: 'kebab-case' },
+          { type: 'attribute', prefix: 'cw', style: 'camelCase' },
+        ],
       ],
     },
   },
   {
     files: ['src/app/design-system/**/*.ts'],
+    // Relative paths only, so that a package path such as '@angular/core/testing' doesn't match.
     rules: restrict(
-      '(^@cw/core)|(/(core|features|shell)/)',
+      '(^@cw/core)|(^\\.{1,2}/(.*/)?(core|features|shell)/)',
       'The design system depends on nothing in the app: no core, features or shell imports.',
     ),
   },
   {
     files: ['src/app/core/**/*.ts'],
-    rules: restrict('/(features|shell)/', 'Core must not depend on features or the shell.'),
+    rules: restrict(
+      '^\\.{1,2}/(.*/)?(features|shell)/',
+      'Core must not depend on features or the shell.',
+    ),
   },
   ...features.map((feature) => ({
     files: [`src/app/features/${feature}/**/*.ts`],

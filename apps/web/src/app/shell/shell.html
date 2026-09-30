@@ -1,0 +1,32 @@
+<a class="skip-link" href="#main" (click)="skipToMain($event)">Skip to main content</a>
+
+<header class="header">
+  <span class="brand">Coursewright</span>
+  @if (user(); as user) {
+    <nav class="nav" aria-label="Main">
+      <ul>
+        <li>
+          <a routerLink="/catalog" routerLinkActive="active" ariaCurrentWhenActive="page">
+            Catalog
+          </a>
+        </li>
+        @if (isManager()) {
+          <li>
+            <a routerLink="/reports" routerLinkActive="active" ariaCurrentWhenActive="page">
+              Reports
+            </a>
+          </li>
+        }
+      </ul>
+    </nav>
+    <p class="user">
+      <span class="user-name">{{ user.displayName }}</span>
+      <span class="tenant">{{ user.tenantName }}</span>
+    </p>
+    <button cwButton variant="secondary" type="button" (click)="signOut()">Sign out</button>
+  }
+</header>
+
+<main #main id="main" class="main" tabindex="-1">
+  <router-outlet />
+</main>

@@ -1,0 +1,46 @@
+<h1>Reports</h1>
+
+<cw-card heading="Completions report" [headingLevel]="2">
+  <p>Export your organization's course completions as a CSV file.</p>
+
+  <div class="field">
+    <label for="fail-attempts">Simulated failures</label>
+    <p id="fail-attempts-hint" class="hint">
+      For learning: how many attempts the export worker fails before it succeeds. 1 or 2 shows
+      retries with backoff; 3 uses up every retry, so the export fails.
+    </p>
+    <select id="fail-attempts" aria-describedby="fail-attempts-hint" [formControl]="failAttempts">
+      @for (count of failureOptions; track count) {
+        <option [ngValue]="count">{{ count }}</option>
+      }
+    </select>
+  </div>
+
+  <button cwButton type="button" [busy]="exporting()" (click)="exportReport()">
+    Export completions report
+  </button>
+
+  @let current = job();
+  @if (current) {
+    <cw-progress class="progress" label="Export progress" [value]="current.progress" />
+  }
+
+  <!-- Always rendered: a live region must exist before its text changes to be announced. -->
+  <p class="status" role="status">{{ statusText() }}</p>
+
+  @if (current?.status === 'completed') {
+    <button
+      cwButton
+      variant="secondary"
+      type="button"
+      [busy]="downloading()"
+      (click)="download(current.id)"
+    >
+      Download report
+    </button>
+  }
+
+  @if (error(); as error) {
+    <p class="error" role="alert">{{ error }}</p>
+  }
+</cw-card>

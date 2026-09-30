@@ -1,0 +1,56 @@
+<p class="back"><a routerLink="/catalog">Back to catalog</a></p>
+
+<h1>{{ heading() }}</h1>
+
+@if (course.hasValue()) {
+  @let details = course.value();
+  <dl class="facts">
+    <div>
+      <dt>Level</dt>
+      <dd>{{ details.level | titlecase }}</dd>
+    </div>
+    <div>
+      <dt>Duration</dt>
+      <dd>{{ details.durationMinutes }} minutes</dd>
+    </div>
+    <div>
+      <dt>Lessons</dt>
+      <dd>{{ details.lessons.length }}</dd>
+    </div>
+  </dl>
+
+  <div class="enroll">
+    @if (enrolled()) {
+      <p #enrolledStatus class="enrolled" tabindex="-1">You're enrolled</p>
+    } @else {
+      <!-- Busy, never disabled: a double-click must reach exhaustMap, which absorbs it. -->
+      <button
+        cwButton
+        type="button"
+        [busy]="enrollment.status() === 'pending'"
+        (click)="enrollment.enroll(details.id)"
+      >
+        Enroll
+      </button>
+      @if (enrollment.error(); as error) {
+        <p class="error" role="alert">{{ error }}</p>
+      }
+    }
+  </div>
+
+  <p class="description">{{ details.description }}</p>
+
+  <cw-card heading="Lessons" [headingLevel]="2">
+    <ol class="lessons">
+      @for (lesson of details.lessons; track lesson.id) {
+        <li>
+          {{ lesson.title }} <span class="minutes">{{ lesson.durationMinutes }} min</span>
+        </li>
+      }
+    </ol>
+  </cw-card>
+} @else if (notFound()) {
+  <p>This course doesn't exist, or it isn't in your organization's catalog.</p>
+} @else if (course.error()) {
+  <p role="alert">{{ errorMessage() }}</p>
+}

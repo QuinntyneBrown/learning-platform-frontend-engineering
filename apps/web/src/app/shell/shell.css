@@ -1,0 +1,71 @@
+:host {
+  display: block;
+  min-height: 100vh;
+}
+
+/* Off-screen until focused: then it's the first thing a keyboard user sees. */
+.skip-link {
+  position: absolute;
+  top: var(--cw-space-2);
+  left: var(--cw-space-2);
+  z-index: 1;
+  padding: var(--cw-space-2) var(--cw-space-4);
+  border-radius: var(--cw-radius-sm);
+  background: var(--cw-color-primary);
+  color: var(--cw-color-on-primary);
+  font-weight: 600;
+  transform: translateY(-200%);
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-4) var(--cw-space-6);
+  padding: var(--cw-space-3) var(--cw-space-6);
+  border-bottom: 1px solid var(--cw-color-border);
+}
+
+.brand {
+  font-size: var(--cw-font-size-lg);
+  font-weight: 700;
+}
+
+.nav ul {
+  display: flex;
+  gap: var(--cw-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nav a {
+  font-weight: 600;
+}
+
+.nav a.active {
+  text-decoration-thickness: 3px;
+}
+
+.user {
+  display: flex;
+  flex-direction: column;
+  margin: 0 0 0 auto;
+  line-height: 1.25;
+  text-align: right;
+}
+
+.tenant {
+  color: var(--cw-color-text-muted);
+  font-size: var(--cw-font-size-sm);
+}
+
+.main {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: var(--cw-space-6);
+}

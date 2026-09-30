@@ -1,1 +1,35 @@
-/* You can add global styles to this file, and also import other style files */
+@import './app/design-system/tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--cw-color-bg);
+  color: var(--cw-color-text);
+  font-family: var(--cw-font-family);
+  font-size: var(--cw-font-size-md);
+  line-height: var(--cw-line-height);
+}
+
+h1 {
+  margin: 0 0 var(--cw-space-4);
+  font-size: var(--cw-font-size-xl);
+  line-height: 1.2;
+}
+
+a {
+  color: var(--cw-color-primary);
+  text-underline-offset: 0.15em;
+}
+
+a:hover {
+  color: var(--cw-color-primary-hover);
+}
+
+code {
+  font-family: var(--cw-font-mono);
+}

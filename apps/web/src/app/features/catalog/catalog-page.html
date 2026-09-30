@@ -1,0 +1,53 @@
+<h1>Catalog</h1>
+
+<div class="search" role="search">
+  <label for="course-search">Search courses</label>
+  <input
+    #searchBox
+    id="course-search"
+    type="search"
+    autocomplete="off"
+    [value]="query()"
+    (input)="onSearch(searchBox.value)"
+  />
+</div>
+
+<!-- role="status" is a polite live region: result counts are read out without moving focus. -->
+<p class="status" role="status">{{ statusText() }}</p>
+
+@if (store.items().length > 0) {
+  <ul class="results" aria-label="Courses" [class.stale]="store.status() === 'loading'">
+    @for (course of store.items(); track course.id) {
+      <li>
+        <cw-card>
+          <h2 class="course-title">
+            <a [routerLink]="['/courses', course.id]">{{ course.title }}</a>
+          </h2>
+          <p class="summary">{{ course.summary }}</p>
+          <p class="meta">{{ course.level | titlecase }} · {{ course.durationMinutes }} min</p>
+        </cw-card>
+      </li>
+    }
+  </ul>
+}
+
+@if (store.nextCursor()) {
+  <button
+    cwButton
+    variant="secondary"
+    type="button"
+    [busy]="store.loadingMore()"
+    (click)="store.loadMore()"
+  >
+    Load more courses
+  </button>
+}
+
+<!-- Below the fold: its code and its request wait until it scrolls into view. -->
+@defer (on viewport) {
+  <cw-my-enrollments />
+} @placeholder {
+  <p class="deferred">Your enrollments</p>
+} @loading (minimum 300ms) {
+  <p class="deferred">Loading your enrollments…</p>
+}

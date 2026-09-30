@@ -6,7 +6,8 @@
     "strict": true,
     "paths": {
       "@cw/core": ["./src/app/core/index.ts"],
-      "@cw/design-system": ["./src/app/design-system/index.ts"]
+      "@cw/design-system": ["./src/app/design-system/index.ts"],
+      "@cw/design-system/forms": ["./src/app/design-system/forms.ts"]
     },
     "noImplicitOverride": true,
     "noPropertyAccessFromIndexSignature": true,

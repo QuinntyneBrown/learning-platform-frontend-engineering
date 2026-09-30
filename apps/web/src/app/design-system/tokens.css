@@ -1,0 +1,97 @@
+/*
+ * Design tokens. Components read only these custom properties, so a theme (or a tenant's
+ * brand) is a matter of redefining them. Every text/background pair meets WCAG AA (4.5:1);
+ * borders of form controls and the focus ring meet the 3:1 non-text contrast minimum.
+ */
+:root {
+  color-scheme: light dark;
+
+  --cw-color-bg: #ffffff;
+  --cw-color-surface: #f5f6f8;
+  --cw-color-text: #1b1f24;
+  --cw-color-text-muted: #4b5563;
+  --cw-color-border: #d5d9e0;
+  --cw-color-control-border: #6b7280;
+  --cw-color-primary: #1d4ed8;
+  --cw-color-primary-hover: #1e40af;
+  --cw-color-on-primary: #ffffff;
+  --cw-color-danger: #b91c1c;
+  --cw-color-danger-surface: #fdecec;
+  --cw-color-success: #15803d;
+  --cw-color-focus: #1d4ed8;
+
+  --cw-font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --cw-font-mono: ui-monospace, 'Cascadia Code', Menlo, monospace;
+  --cw-font-size-sm: 0.875rem;
+  --cw-font-size-md: 1rem;
+  --cw-font-size-lg: 1.25rem;
+  --cw-font-size-xl: 1.75rem;
+  --cw-line-height: 1.5;
+
+  --cw-space-1: 0.25rem;
+  --cw-space-2: 0.5rem;
+  --cw-space-3: 0.75rem;
+  --cw-space-4: 1rem;
+  --cw-space-6: 1.5rem;
+  --cw-space-8: 2rem;
+
+  --cw-radius-sm: 0.25rem;
+  --cw-radius-md: 0.5rem;
+
+  --cw-focus-ring: 3px solid var(--cw-color-focus);
+  --cw-focus-offset: 2px;
+  --cw-transition: 150ms ease-out;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --cw-color-bg: #111418;
+    --cw-color-surface: #1b2027;
+    --cw-color-text: #e6e9ef;
+    --cw-color-text-muted: #a9b1be;
+    --cw-color-border: #343b46;
+    --cw-color-control-border: #8a93a3;
+    --cw-color-primary: #8ab4ff;
+    --cw-color-primary-hover: #adc9ff;
+    --cw-color-on-primary: #0b1220;
+    --cw-color-danger: #ff9b9b;
+    --cw-color-danger-surface: #3a1d1f;
+    --cw-color-success: #6ee7a0;
+    --cw-color-focus: #8ab4ff;
+  }
+}
+
+/* Keyboard users get a visible ring; mouse clicks don't (that's what :focus-visible decides). */
+:focus-visible {
+  outline: var(--cw-focus-ring);
+  outline-offset: var(--cw-focus-offset);
+}
+
+/* Headings and <main> receive focus from script after navigation; they aren't controls. */
+[tabindex='-1']:focus:not(:focus-visible) {
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Hidden visually, still read by screen readers. */
+.cw-visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

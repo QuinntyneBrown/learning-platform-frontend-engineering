@@ -1,0 +1,51 @@
+.back {
+  margin: 0 0 var(--cw-space-4);
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-6);
+  margin: 0 0 var(--cw-space-6);
+}
+
+.facts dt {
+  color: var(--cw-color-text-muted);
+  font-size: var(--cw-font-size-sm);
+}
+
+.facts dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.enroll {
+  min-height: 2.75rem;
+  margin-bottom: var(--cw-space-6);
+}
+
+.enrolled {
+  display: inline-block;
+  margin: 0;
+  color: var(--cw-color-success);
+  font-weight: 700;
+}
+
+.error {
+  color: var(--cw-color-danger);
+  font-weight: 600;
+}
+
+.description {
+  max-width: 65ch;
+}
+
+.lessons {
+  margin: 0;
+  padding-left: var(--cw-space-6);
+}
+
+.minutes {
+  color: var(--cw-color-text-muted);
+  font-size: var(--cw-font-size-sm);
+}

@@ -1,0 +1,19 @@
+<label class="label" [for]="inputId">{{ label() }}</label>
+@if (hint()) {
+  <p class="hint" [id]="hintId">{{ hint() }}</p>
+}
+<input
+  class="input"
+  [id]="inputId"
+  [type]="type()"
+  [value]="value()"
+  [disabled]="disabled()"
+  [attr.autocomplete]="autocomplete()"
+  [attr.aria-describedby]="describedBy()"
+  [attr.aria-invalid]="error() ? 'true' : null"
+  (input)="onInput($event)"
+  (blur)="onTouched()"
+/>
+@if (error()) {
+  <p class="error" [id]="errorId">{{ error() }}</p>
+}
