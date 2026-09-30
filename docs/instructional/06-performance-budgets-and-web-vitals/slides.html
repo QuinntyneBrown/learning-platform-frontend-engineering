@@ -1,0 +1,743 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 06 Slides</title>
+<!--
+  Slides for the lesson 06 video. Each <section> is one slide. data-cue is a phrase from script.md:
+  tools/instructional-video/build.cs shows the slide from the moment the narration reaches that phrase.
+  Open this file in a browser and use the arrow keys to step through the deck.
+-->
+<link rel="stylesheet" href="../assets/slides.css">
+</head>
+<body data-lesson-number="06" data-lesson-title="Performance Budgets and Web Vitals" data-parts="Introduction|The questions|Web vitals|Measuring in the field|The initial bundle|Lazy and deferred|Barrels|Rendering work|Keyset pagination|Investigating INP|Traps|Interview drill|Recap">
+
+<!-- ───────────── Intro ───────────── -->
+<section id="title" data-part="0">
+  <div class="kicker">Coursewright frontend · Lesson 06</div>
+  <h1>Performance Budgets<br>and Web Vitals</h1>
+  <p class="lead">How you know it's slow, for whom, and how you stop it getting slow again.</p>
+</section>
+
+<!-- ───────────── Questions ───────────── -->
+<section id="questions" data-part="1" data-cue="The questions this lesson answers">
+  <h2>The questions this lesson answers</h2>
+  <ul>
+    <li>INP is poor on the catalog for low-end Android. How do you find the cause?</li>
+    <li>What goes in the initial bundle, and how do you keep it there?</li>
+    <li>@defer or a lazy route: when each?</li>
+    <li>Why is OFFSET 10000 slow? What does a keyset cursor need from the index?</li>
+    <li>How would you render 10,000 rows?</li>
+  </ul>
+</section>
+
+<section id="thesis" data-part="1" data-cue="Keep one sentence in your head while you listen">
+  <div class="kicker">The thesis</div>
+  <p class="quote">Measure what users feel, <span class="accent">in the field</span>, and make regressions <span class="amber">fail the build</span>.</p>
+  <p class="muted" style="margin-top:48px">Performance that isn't budgeted erodes, like architecture that isn't linted.</p>
+</section>
+
+<!-- ───────────── Web vitals ───────────── -->
+<template id="vitals">
+  <h2>Three web vitals, at the 75th percentile</h2>
+  <div class="cols3">
+    <div class="card item"><h3>LCP · loading</h3><p>The largest image or text block in the viewport has rendered.</p><p class="small green">Good ≤ 2.5 s</p></div>
+    <div class="card item"><h3>INP · responsiveness</h3><p>Click, tap or key press → the next frame. Roughly the slowest of the visit.</p><p class="small green">Good ≤ 200 ms · poor &gt; 500 ms</p></div>
+    <div class="card item"><h3>CLS · stability</h3><p>How much visible content moves unexpectedly.</p><p class="small green">Good ≤ 0.1</p></div>
+  </div>
+  <p class="small muted" style="margin-top:36px">Core Web Vitals and thresholds as of September 2026. Check them for your year.</p>
+</template>
+<section id="vitals-0" data-part="2" data-cue="As of September 2026, Google's Core Web Vitals are three metrics" data-template="vitals"></section>
+<section id="vitals-lcp" data-part="2" data-cue="LCP, Largest Contentful Paint, is loading" data-template="vitals" data-highlight="1"></section>
+<section id="vitals-inp" data-part="2" data-cue="INP, Interaction to Next Paint, is responsiveness" data-template="vitals" data-highlight="2"></section>
+<section id="vitals-cls" data-part="2" data-cue="CLS, Cumulative Layout Shift, is stability" data-template="vitals" data-highlight="3"></section>
+
+<section id="field" data-part="2" data-cue="The important word is field">
+  <h2>Lab or field?</h2>
+  <div class="cols">
+    <div class="card legacy"><h3 class="amber">Lighthouse (lab)</h3><p>One load, one machine, no real user. Can't measure INP: nobody interacts.</p></div>
+    <div class="card modern"><h3>Real-user monitoring (field)</h3><p>Mid-range phones, forty tabs, real interactions. The number your users feel.</p></div>
+  </div>
+</section>
+
+<!-- ───────────── Measuring in the field ───────────── -->
+<section id="rum-lazy" data-part="3" data-cue="Open apps/web/src/app/core/observability/rum.ts">
+  <h2>web-vitals, imported lazily</h2>
+  <div class="file">apps/web/src/app/core/observability/rum.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,3">// Loaded lazily: monitoring code shouldn't compete with the page for the initial bundle.
+private async observeWebVitals(): Promise&lt;void&gt; {
+  const { onCLS, onINP, onLCP } = await import('web-vitals');
+  const report = ({ name, value, rating }: Metric) =&gt;
+    this.record({ kind: 'web-vital', name, value, rating, url: this.url() });
+  onLCP(report);
+  onINP(report);
+  onCLS(report);
+}</pre>
+  <div class="file">apps/web/src/app/app.config.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts">provideAppInitializer(() =&gt; inject(Rum).start()),</pre>
+  <p class="small muted">Its own lazy chunk: about 8 kB raw, 3 kB over the wire. The library reads buffered entries, so starting late loses nothing.</p>
+</section>
+
+<section id="rum-flush" data-part="3" data-cue="It then registers three callbacks">
+  <h2>Flush when the page is hidden</h2>
+  <div class="file">apps/web/src/app/core/observability/rum.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="4,5,6,7">start(): void {
+  if (!this.enabled) return;
+  void this.observeWebVitals();
+  // "hidden" is the last event a page reliably gets: mobile browsers may discard a background
+  // tab without ever firing unload. web-vitals reports its final LCP/INP/CLS values then, too.
+  this.document.addEventListener('visibilitychange', () =&gt; {
+    if (this.document.visibilityState === 'hidden') this.flush();
+  });
+}</pre>
+  <p class="small muted">Also flushed when a batch reaches MAX_BATCH (10). The beacon and the endpoint are lesson 11.</p>
+</section>
+
+<section id="rum-gap" data-part="3" data-cue="Notice what isn't recorded yet">
+  <h2>What each event carries</h2>
+  <div class="cols">
+    <div class="card modern">
+      <h3>Recorded today</h3>
+      <ul>
+        <li>name: LCP, INP or CLS</li>
+        <li>value and rating</li>
+        <li>the page URL</li>
+      </ul>
+    </div>
+    <div class="card legacy">
+      <h3 class="amber">Not yet</h3>
+      <ul>
+        <li>Which element was interacted with</li>
+        <li>Which phase was slow</li>
+        <li>What kind of device</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── The initial bundle ───────────── -->
+<section id="budgets" data-part="4" data-cue="Now the build. Open apps/web/angular.json">
+  <h2>Budgets in the production build</h2>
+  <div class="file">apps/web/angular.json · excerpt</div>
+  <pre class="code tight" data-lang="json" data-mark="4,5">"budgets": [
+  {
+    "type": "initial",
+    "maximumWarning": "350kB",
+    "maximumError": "500kB"
+  },
+  …</pre>
+  <p class="small muted">The second budget: anyComponentStyle, warning at 4kB, error at 8kB. Sizes are raw, before compression.</p>
+  <div class="file">.github/workflows/ci.yml · excerpt</div>
+  <pre class="code tight" data-lang="yaml">- name: Build (fails on Angular bundle budgets)
+  run: pnpm build</pre>
+</section>
+
+<section id="build-output" data-part="4" data-cue="Here's where it stands today">
+  <h2>Where it stands today</h2>
+  <div class="file">pnpm --filter @coursewright/web build · output, September 2026 · condensed</div>
+  <pre class="code tight" data-mark="5">Initial chunk files | Names          |  Raw size | Estimated transfer size
+main-VM57K2HT.js    | main           | 330.04 kB |                91.19 kB
+styles-46KE4GT5.css | styles         |   2.29 kB |               749 bytes
+chunk-DJVAsKa_.js   | -              | 464 bytes |               464 bytes
+                    | Initial total  | 332.79 kB |                92.41 kB
+Lazy chunk files    | Names          |  Raw size | Estimated transfer size
+chunk-YYacmYgl.js   | -              |  45.98 kB |                 9.82 kB
+chunk--CJ6yW-s.js   | web-vitals     |   8.19 kB |                 2.89 kB
+chunk-DtvoctPC.js   | catalog-page   |   7.78 kB |                 3.14 kB
+chunk-BbuUPw3m.js   | reports-page   |   6.21 kB |                 2.61 kB
+chunk-DEtgotvl.js   | login-page     |   5.79 kB |                 2.07 kB
+chunk-hiRk6AND.js   | course-page    |   5.10 kB |                 1.99 kB
+…</pre>
+  <p class="small muted">Warning at 350 kB: about 17 kB of headroom.</p>
+</section>
+
+<section id="bundle-bar" data-part="4" data-cue="The study guide measured a bare Angular app">
+  <h2>The initial bundle is mostly framework</h2>
+  <svg width="1640" height="440" viewBox="0 0 1640 440">
+    <line x1="120" y1="250" x2="1520" y2="250" stroke="#22304d" stroke-width="3"/>
+    <text x="120" y="290" fill="#8ea2c0" font-size="22" text-anchor="middle">0</text>
+    <text x="400" y="290" fill="#8ea2c0" font-size="22" text-anchor="middle">100</text>
+    <text x="680" y="290" fill="#8ea2c0" font-size="22" text-anchor="middle">200</text>
+    <text x="960" y="290" fill="#8ea2c0" font-size="22" text-anchor="middle">300</text>
+    <text x="1240" y="290" fill="#8ea2c0" font-size="22" text-anchor="middle">400</text>
+    <text x="1520" y="290" fill="#8ea2c0" font-size="22" text-anchor="middle">500 kB</text>
+    <rect x="120" y="140" width="437" height="90" fill="#1f5f7f"/>
+    <text x="338" y="195" fill="#e8eef8" font-size="26" text-anchor="middle">@angular/core</text>
+    <rect x="557" y="140" width="224" height="90" fill="#2b5f82"/>
+    <text x="669" y="195" fill="#e8eef8" font-size="26" text-anchor="middle">router</text>
+    <rect x="781" y="140" width="137" height="90" fill="#1f5f7f"/>
+    <text x="849" y="195" fill="#e8eef8" font-size="26" text-anchor="middle">common</text>
+    <rect x="918" y="140" width="59" height="90" fill="#2b5f82"/>
+    <rect x="977" y="140" width="34" height="90" fill="#1f5f7f"/>
+    <rect x="1011" y="140" width="42" height="90" fill="#38bdf8"/>
+    <line x1="947" y1="135" x2="947" y2="95" stroke="#8ea2c0" stroke-width="2"/>
+    <text x="930" y="85" fill="#8ea2c0" font-size="22" text-anchor="end">RxJS</text>
+    <line x1="1032" y1="135" x2="1032" y2="60" stroke="#38bdf8" stroke-width="2"/>
+    <text x="1045" y="55" fill="#38bdf8" font-size="22">Coursewright's own code: under 5%</text>
+    <line x1="714" y1="120" x2="714" y2="250" stroke="#8ea2c0" stroke-width="3" stroke-dasharray="8 6"/>
+    <text x="714" y="112" fill="#8ea2c0" font-size="22" text-anchor="middle">bare app ≈ 212 kB</text>
+    <line x1="1100" y1="110" x2="1100" y2="250" stroke="#f5b544" stroke-width="4"/>
+    <text x="1112" y="140" fill="#f5b544" font-size="24">warn 350</text>
+    <line x1="1520" y1="110" x2="1520" y2="250" stroke="#f87171" stroke-width="4"/>
+    <text x="1508" y="140" fill="#f87171" font-size="24" text-anchor="end">fail 500</text>
+    <text x="120" y="360" fill="#e8eef8" font-size="28">Initial total: 332.79 kB raw · 92.41 kB estimated transfer</text>
+    <text x="120" y="405" fill="#8ea2c0" font-size="22">Shares are approximate, from the build's stats file (ng build --stats-json). "Bare app" is the study guide's measurement.</text>
+  </svg>
+</section>
+
+<section id="what-belongs" data-part="4" data-cue="So what belongs in the initial bundle?">
+  <h2>What belongs in the initial bundle</h2>
+  <div class="cols">
+    <div class="card modern">
+      <h3>Initial: every page needs it</h3>
+      <ul>
+        <li>The framework and the router</li>
+        <li>The shell</li>
+        <li>Auth, HttpClient, interceptors</li>
+        <li>The primitives the shell uses</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Lazy: one page needs it</h3>
+      <ul>
+        <li>Each feature page</li>
+        <li>@angular/forms</li>
+        <li>web-vitals</li>
+        <li>The deferred enrollments panel</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── Lazy and deferred ───────────── -->
+<section id="routes" data-part="5" data-cue="Open apps/web/src/app/app.routes.ts">
+  <h2>Every feature is a lazy route</h2>
+  <div class="file">apps/web/src/app/app.routes.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,2,10">// Every feature is lazy-loaded, so the initial bundle is just the shell, core and design system.
+// canMatch (not canActivate) also keeps a guarded feature's code from downloading at all.
+export const routes: Routes = [
+  { path: '', pathMatch: 'full', redirectTo: 'catalog' },
+  // …
+  {
+    path: 'catalog',
+    title: 'Catalog',
+    canMatch: [authGuard],
+    loadComponent: () =&gt; import('./features/catalog/catalog-page').then((m) =&gt; m.CatalogPage),
+  },
+  // …
+];</pre>
+</section>
+
+<section id="defer-diagram" data-part="5" data-cue="Inside a page, the tool is a deferred block">
+  <h2>A deferred block, inside a page</h2>
+  <svg width="1640" height="520" viewBox="0 0 1640 520">
+    <defs><marker id="arrow-df" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="0" y="0" width="620" height="500" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="40" y="60" fill="#e8eef8" font-size="30" font-weight="600">Catalog</text>
+    <rect x="40" y="90" width="540" height="56" rx="10" fill="#0a1020" stroke="#22304d"/>
+    <text x="60" y="126" fill="#8ea2c0" font-size="22">Search courses</text>
+    <rect x="40" y="165" width="540" height="50" rx="10" fill="#0f2233" stroke="#1f5f7f"/>
+    <rect x="40" y="225" width="540" height="50" rx="10" fill="#0f2233" stroke="#1f5f7f"/>
+    <rect x="40" y="285" width="540" height="50" rx="10" fill="#0f2233" stroke="#1f5f7f"/>
+    <text x="310" y="198" fill="#e8eef8" font-size="22" text-anchor="middle">course card</text>
+    <text x="310" y="258" fill="#e8eef8" font-size="22" text-anchor="middle">course card</text>
+    <text x="310" y="318" fill="#e8eef8" font-size="22" text-anchor="middle">course card</text>
+    <line x1="0" y1="365" x2="620" y2="365" stroke="#f5b544" stroke-width="3" stroke-dasharray="10 8"/>
+    <text x="600" y="355" fill="#f5b544" font-size="22" text-anchor="end">the fold</text>
+    <rect x="40" y="395" width="540" height="80" rx="10" fill="#0a1020" stroke="#38bdf8" stroke-width="3" stroke-dasharray="8 6"/>
+    <text x="310" y="443" fill="#38bdf8" font-size="24" text-anchor="middle">@placeholder: "Your enrollments"</text>
+    <line x1="590" y1="435" x2="758" y2="435" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-df)"/>
+    <text x="640" y="395" fill="#8ea2c0" font-size="20">on viewport</text>
+    <rect x="770" y="330" width="400" height="170" rx="18" fill="#0f2233" stroke="#1f5f7f" stroke-width="3"/>
+    <text x="970" y="390" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">1 · the chunk</text>
+    <text x="970" y="432" fill="#8ea2c0" font-size="22" text-anchor="middle">my-enrollments: 1.91 kB raw</text>
+    <rect x="1240" y="330" width="400" height="170" rx="18" fill="#0f2233" stroke="#1f5f7f" stroke-width="3"/>
+    <text x="1440" y="390" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">2 · the request</text>
+    <text x="1440" y="432" fill="#8ea2c0" font-size="22" text-anchor="middle">GET /api/me/enrollments</text>
+    <line x1="1172" y1="415" x2="1230" y2="415" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-df)"/>
+    <text x="770" y="120" fill="#e8eef8" font-size="30">Nothing below the fold is fetched</text>
+    <text x="770" y="162" fill="#e8eef8" font-size="30">until the placeholder scrolls into view.</text>
+    <text x="770" y="230" fill="#8ea2c0" font-size="24">The bytes are small. The saving is the request</text>
+    <text x="770" y="266" fill="#8ea2c0" font-size="24">and the rendering work.</text>
+  </svg>
+</section>
+
+<section id="defer-code" data-part="5" data-cue="The comment says: below the fold, its code and its request wait">
+  <h2>@defer (on viewport)</h2>
+  <div class="file">apps/web/src/app/features/catalog/catalog-page.html · excerpt</div>
+  <pre class="code tight" data-lang="html" data-mark="1,2">&lt;!-- Below the fold: its code and its request wait until it scrolls into view. --&gt;
+@defer (on viewport) {
+  &lt;cw-my-enrollments /&gt;
+} @placeholder {
+  &lt;p class="deferred"&gt;Your enrollments&lt;/p&gt;
+} @loading (minimum 300ms) {
+  &lt;p class="deferred"&gt;Loading your enrollments…&lt;/p&gt;
+}</pre>
+  <div class="file">apps/web/src/app/features/catalog/my-enrollments.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="4">/** Loaded with @defer (on viewport) by the catalog page, so it costs nothing until it's seen. */
+// …
+  // rxResource turns an Observable into signals for value, status and error.
+  protected readonly enrollments = rxResource({ stream: () =&gt; this.api.myEnrollments() });</pre>
+</section>
+
+<section id="defer-companions" data-part="5" data-cue="The block has two companions">
+  <h2>Placeholder and loading</h2>
+  <div class="cols">
+    <div class="card"><h3>@placeholder</h3><p>A real element with a minimum height. It's what the viewport trigger watches.</p></div>
+    <div class="card"><h3>@loading (minimum 300ms)</h3><p>Once it appears, it stays long enough not to flash.</p></div>
+  </div>
+  <div class="file" style="margin-top:36px">apps/web/src/app/features/catalog/catalog-page.css · excerpt</div>
+  <pre class="code tight" data-lang="css" data-mark="2">.deferred {
+  min-height: 6rem;
+  margin-top: var(--cw-space-8);
+  color: var(--cw-color-text-muted);
+}</pre>
+</section>
+
+<section id="route-vs-defer" data-part="5" data-cue="That answers the third question">
+  <h2>Lazy route or deferred block?</h2>
+  <div class="cols">
+    <div class="card">
+      <h3>Lazy route</h3>
+      <ul>
+        <li>Splits by URL</li>
+        <li>A page: its own guard and title</li>
+        <li>Loaded on navigation</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>@defer</h3>
+      <ul>
+        <li>Splits inside a page</li>
+        <li>viewport · interaction · hover · idle · timer · when</li>
+        <li>A chart, an editor, a side panel</li>
+      </ul>
+    </div>
+  </div>
+  <p class="amber" style="margin-top:36px">Never defer above the fold: it delays LCP and shifts the page.</p>
+</section>
+
+<!-- ───────────── Barrels ───────────── -->
+<section id="forms-entry" data-part="6" data-cue="Lesson one mentioned a trap, and here are the numbers">
+  <h2>Forms gets its own entry point</h2>
+  <div class="file">apps/web/src/app/design-system/forms.ts</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,2,3">// A separate entry point, because TextField pulls in @angular/forms (about 56 kB). Barrel
+// re-exports aren't tree-shaken here, so exporting it from index.ts would put forms in the
+// initial bundle of every page. Only the lazy login feature imports this.
+export { TextField } from './text-field/text-field';</pre>
+  <div class="file">apps/web/src/app/features/login/login-page.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts">import { TextField } from '@cw/design-system/forms';</pre>
+  <div class="file">apps/web/src/app/features/reports/reports-page.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts">import { FormControl, ReactiveFormsModule } from '@angular/forms';</pre>
+</section>
+
+<section id="chunk-graph" data-part="6" data-cue="In today's build, forms sits in its own lazy chunk">
+  <h2>Where forms ends up</h2>
+  <svg width="1640" height="500" viewBox="0 0 1640 500">
+    <defs><marker id="arrow-cg" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="0" y="160" width="330" height="150" rx="18" fill="#121b2f" stroke="#38bdf8" stroke-width="3"/>
+    <text x="165" y="222" fill="#e8eef8" font-size="30" font-weight="600" text-anchor="middle">main (initial)</text>
+    <text x="165" y="262" fill="#8ea2c0" font-size="22" text-anchor="middle">330 kB · no forms</text>
+    <rect x="480" y="0" width="340" height="72" rx="14" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="650" y="46" fill="#e8eef8" font-size="24" text-anchor="middle">catalog-page · 7.8 kB</text>
+    <rect x="480" y="100" width="340" height="72" rx="14" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="650" y="146" fill="#e8eef8" font-size="24" text-anchor="middle">course-page · 5.1 kB</text>
+    <rect x="480" y="200" width="340" height="72" rx="14" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="650" y="246" fill="#e8eef8" font-size="24" text-anchor="middle">login-page · 5.8 kB</text>
+    <rect x="480" y="300" width="340" height="72" rx="14" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="650" y="346" fill="#e8eef8" font-size="24" text-anchor="middle">reports-page · 6.2 kB</text>
+    <rect x="480" y="400" width="340" height="72" rx="14" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="650" y="446" fill="#e8eef8" font-size="24" text-anchor="middle">web-vitals · 8.2 kB</text>
+    <line x1="335" y1="215" x2="472" y2="40" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-cg)"/>
+    <line x1="335" y1="225" x2="472" y2="138" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-cg)"/>
+    <line x1="335" y1="235" x2="472" y2="236" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-cg)"/>
+    <line x1="335" y1="245" x2="472" y2="334" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-cg)"/>
+    <line x1="335" y1="255" x2="472" y2="432" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-cg)"/>
+    <rect x="1000" y="0" width="420" height="72" rx="14" fill="#0f2233" stroke="#1f5f7f" stroke-width="2"/>
+    <text x="1210" y="46" fill="#e8eef8" font-size="24" text-anchor="middle">my-enrollments · 1.9 kB</text>
+    <line x1="825" y1="36" x2="992" y2="36" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-cg)"/>
+    <text x="910" y="24" fill="#8ea2c0" font-size="20" text-anchor="middle">@defer</text>
+    <rect x="1000" y="210" width="420" height="150" rx="18" fill="#0f2233" stroke="#38bdf8" stroke-width="3"/>
+    <text x="1210" y="272" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">@angular/forms</text>
+    <text x="1210" y="312" fill="#8ea2c0" font-size="22" text-anchor="middle">46 kB raw · 9.8 kB over the wire</text>
+    <line x1="825" y1="236" x2="992" y2="262" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-cg)"/>
+    <line x1="825" y1="336" x2="992" y2="310" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-cg)"/>
+    <text x="1000" y="420" fill="#e8eef8" font-size="24">Shared by login and reports.</text>
+    <text x="1000" y="456" fill="#8ea2c0" font-size="22">An import path is a bundling decision.</text>
+  </svg>
+</section>
+
+<!-- ───────────── Rendering work ───────────── -->
+<section id="zoneless" data-part="7" data-cue="Bytes are only half of it">
+  <h2>Bytes are half of it. Main-thread work is the other half.</h2>
+  <div class="file">apps/web/src/app/app.config.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1">// Zoneless is the default: there is no zone.js, and signals and template events schedule rendering.
+export const appConfig: ApplicationConfig = {</pre>
+  <div class="file">apps/web/src/app/shell/shell.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="3">// OnPush is already the default in v22; the house rule is to write it out anyway, so the
+// intent survives copy-paste into older code and is obvious in review.
+changeDetection: ChangeDetectionStrategy.OnPush,</pre>
+  <p class="small muted">No zone.js in the bundle, no app-wide check after every timer or request. Only views whose signals changed. More in lesson 02.</p>
+</section>
+
+<section id="track" data-part="7" data-cue="Lists are where rendering work piles up">
+  <h2>Track by ID</h2>
+  <div class="file">apps/web/src/app/features/catalog/catalog-page.html · excerpt</div>
+  <pre class="code tight" data-lang="html" data-mark="1">@for (course of store.items(); track course.id) {</pre>
+  <div class="file">apps/web/src/app/features/catalog/catalog.store.ts · excerpt: search, then loadMore</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,3">patchState(store, { items, nextCursor, status: 'loaded' }),
+// …
+patchState(store, { items: [...store.items(), ...items], nextCursor });</pre>
+  <div class="cols">
+    <p class="small"><span class="accent">Load more</span>: existing items are kept, new ones added</p>
+    <p class="small"><span class="accent">New search</span>: courses in both results reuse their DOM</p>
+  </div>
+</section>
+
+<section id="ten-thousand" data-part="7" data-cue="That leads to the fifth question: ten thousand rows">
+  <h2>Ten thousand rows</h2>
+  <div class="cols3">
+    <div class="card modern"><h3>1 · Page on the server</h3><p>Coursewright: 20 at a time, Load more, limit capped at 50.</p></div>
+    <div class="card"><h3>2 · Virtualize</h3><p>Only visible rows in the DOM. Costs: heights, find in page, screen readers.</p></div>
+    <div class="card"><h3>3 · content-visibility</h3><p>Skips rendering off-screen rows; they stay in the DOM.</p></div>
+  </div>
+  <div class="file" style="margin-top:36px">Sketch · not in this repo (the CDK isn't a dependency) · check for your version</div>
+  <pre class="code tight" data-lang="html">&lt;cdk-virtual-scroll-viewport itemSize="72" class="results"&gt;
+  &lt;cw-course-row *cdkVirtualFor="let course of courses(); trackBy: byId" [course]="course" /&gt;
+&lt;/cdk-virtual-scroll-viewport&gt;</pre>
+</section>
+
+<!-- ───────────── Keyset pagination ───────────── -->
+<section id="keyset-comment" data-part="8" data-cue="Now the server side. Open apps/bff/src/routes/courses.ts">
+  <h2>Keyset pagination, not OFFSET</h2>
+  <div class="file">apps/bff/src/routes/courses.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2,3,4">/**
+ * Keyset pagination, not OFFSET: each page seeks straight to where the last one ended using the
+ * (tenant_id, title, id) index, so page 50 costs the same as page 1, and rows added or removed
+ * meanwhile can't shift later pages into duplicates or gaps. `id` breaks ties between equal titles.
+ */
+function searchCourses(</pre>
+  <div class="file">apps/bff/src/routes/courses.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1">// Cursors are opaque to clients (base64url JSON), so the sort key can change without breaking them.
+function encodeCursor({ title, id }: SortKey): string {
+  return Buffer.from(JSON.stringify([title, id])).toString('base64url');
+}</pre>
+</section>
+
+<section id="keyset-query" data-part="8" data-cue="The query filters by tenant and title">
+  <h2>Seek past the cursor, one extra row</h2>
+  <div class="file">apps/bff/src/routes/courses.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="4,11,12">const where = ['c.tenant_id = ?', "c.title LIKE ? ESCAPE '\\'"];
+const params: SQLInputValue[] = [tenantId, `%${escapeLike(q)}%`];
+if (after) {
+  where.push('(c.title, c.id) &gt; (?, ?)'); // SQLite row values compare title first, then id
+  params.push(after.title, after.id);
+}
+const sql = `
+  SELECT ${SUMMARY_COLUMNS}
+  FROM courses c
+  WHERE ${where.join(' AND ')}
+  ORDER BY c.title, c.id
+  LIMIT ?`;</pre>
+  <p class="small muted">The handler asks for limit + 1 rows: if the extra one comes back, nextCursor is set.</p>
+</section>
+
+<section id="offset-vs-keyset" data-part="8" data-cue="Here's the fourth question">
+  <h2>OFFSET walks. Keyset seeks.</h2>
+  <svg width="1640" height="460" viewBox="0 0 1640 460">
+    <defs><marker id="arrow-ks" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <text x="0" y="40" fill="#e8eef8" font-size="28" font-weight="600">ORDER BY title, id LIMIT 20 OFFSET 10000</text>
+    <rect x="0" y="70" width="1640" height="70" rx="10" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <rect x="0" y="70" width="1180" height="70" rx="10" fill="#221b0d" stroke="#f5b544" stroke-width="2"/>
+    <text x="590" y="114" fill="#f5b544" font-size="24" text-anchor="middle">10,000 rows read in order, then thrown away</text>
+    <rect x="1180" y="70" width="90" height="70" fill="#0f2233" stroke="#38bdf8" stroke-width="3"/>
+    <text x="1225" y="114" fill="#e8eef8" font-size="22" text-anchor="middle">20</text>
+    <text x="1290" y="114" fill="#8ea2c0" font-size="22">cost grows with depth</text>
+    <text x="0" y="250" fill="#e8eef8" font-size="28" font-weight="600">WHERE (title, id) &gt; (cursor) ORDER BY title, id LIMIT 21</text>
+    <rect x="0" y="280" width="1640" height="70" rx="10" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="590" y="308" fill="#38bdf8" font-size="22" text-anchor="middle">seek in the (tenant_id, title, id) index: nothing read here</text>
+    <line x1="20" y1="330" x2="1166" y2="330" stroke="#38bdf8" stroke-width="3" stroke-dasharray="10 8" marker-end="url(#arrow-ks)"/>
+    <rect x="1180" y="280" width="90" height="70" fill="#0f2233" stroke="#38bdf8" stroke-width="3"/>
+    <text x="1225" y="324" fill="#e8eef8" font-size="22" text-anchor="middle">20 + 1</text>
+    <text x="1290" y="324" fill="#8ea2c0" font-size="22">same cost on any page</text>
+    <text x="0" y="420" fill="#8ea2c0" font-size="24">The index: equality filter first, then the sort columns, ending in a unique column.</text>
+  </svg>
+</section>
+
+<section id="index" data-part="8" data-cue="apps/bff/src/db.ts creates exactly that index">
+  <h2>The index that makes it a range scan</h2>
+  <div class="file">apps/bff/src/db.ts · excerpt</div>
+  <pre class="code tight" data-lang="sql" data-mark="3">-- Keyset pagination seeks to (title, id) within one tenant and reads forward in that order.
+-- This index makes each page a range scan, however deep the page is.
+CREATE INDEX courses_tenant_title_id ON courses (tenant_id, title, id);</pre>
+  <div class="file">EXPLAIN QUERY PLAN for the search with a cursor · run against db.ts and the seed, not in the repo</div>
+  <pre class="code tight" data-mark="1">SEARCH c USING INDEX courses_tenant_title_id (tenant_id=? AND (title,id)&gt;(?,?))
+CORRELATED SCALAR SUBQUERY 1
+SEARCH l USING INDEX sqlite_autoindex_lessons_2 (course_id=?)</pre>
+  <p class="small muted">No temporary B-tree for ORDER BY: the index already delivers rows in title, id order.</p>
+</section>
+
+<section id="keyset-test" data-part="8" data-cue="walks all forty seeded courses in pages of seven">
+  <h2>A test walks every page</h2>
+  <div class="file">apps/bff/test/courses.test.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="3,8,11,12">it('walks every course exactly once, in title order', async () =&gt; {
+  const walked: CourseSummary[] = [];
+  let query: Record&lt;string, string&gt; | undefined = { limit: '7' };
+  while (query) {
+    const { page } = await search(acme, query);
+    // …
+    walked.push(...page.items);
+    query = page.nextCursor ? { limit: '7', cursor: page.nextCursor } : undefined;
+  }
+  // …
+  expect(new Set(ids).size).toBe(40); // all 40 courses, no duplicates
+  expect(ids).toEqual(onePage.items.map(({ id }) =&gt; id)); // no gaps, and the same order
+  expect(titles).toEqual([...titles].sort());</pre>
+</section>
+
+<section id="keyset-limit" data-part="8" data-cue="Be honest about one limit">
+  <h2>One honest limit</h2>
+  <div class="cols">
+    <div class="card modern"><h3>The index gives</h3><p>The tenant seek, the cursor seek, and the order.</p></div>
+    <div class="card legacy"><h3 class="amber">It can't give</h3><p>LIKE '%signals%': a leading wildcard is checked row by row. At scale: a full-text index.</p></div>
+  </div>
+  <div class="file" style="margin-top:36px">apps/web/src/app/features/catalog/catalog.store.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1">debounceTime(250),
+map((query) =&gt; query.trim()),
+distinctUntilChanged(),</pre>
+</section>
+
+<!-- ───────────── Investigating INP ───────────── -->
+<section id="inp-question" data-part="9" data-cue="Now the core question">
+  <div class="kicker">The core question</div>
+  <p class="quote">INP is poor on the catalog page for <span class="amber">low-end Android</span> devices. How do you find the cause?</p>
+  <div class="steps" style="margin-top:56px">
+    <div class="step"><span class="num">1</span>Confirm and segment in the field</div>
+    <div class="step"><span class="num">2</span>Reproduce in a trace</div>
+    <div class="step"><span class="num">3</span>Read the phase</div>
+    <div class="step"><span class="num">4</span>Fix by phase, verify in the field</div>
+  </div>
+</section>
+
+<section id="attribution" data-part="9" data-cue="First, confirm and segment it in the field">
+  <h2>1 · Add attribution and a device class</h2>
+  <div class="file">Sketch · not in this repo · field names from web-vitals 6; check yours</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,6,7,8,9">import { onINP } from 'web-vitals/attribution';
+
+onINP(({ name, value, rating, attribution }) =&gt; {
+  this.record({
+    kind: 'web-vital', name, value, rating, url: this.url(),
+    target: attribution.interactionTarget,         // which element
+    inputDelay: attribution.inputDelay,             // the three phases
+    processing: attribution.processingDuration,
+    presentation: attribution.presentationDelay,
+    cores: navigator.hardwareConcurrency,           // a coarse device class
+  });
+});</pre>
+  <p class="small muted">The RumEvent schema in openapi.yaml would change first (lesson 07).</p>
+</section>
+
+<section id="reproduce" data-part="9" data-cue="Second, reproduce it">
+  <h2>2 · Reproduce it</h2>
+  <ul class="checks">
+    <li>DevTools → Performance, CPU throttled</li>
+    <li>Or a real low-end phone, through remote debugging</li>
+    <li>Record the interaction the field data points at</li>
+    <li>Read the interaction's phases in the trace</li>
+  </ul>
+</section>
+
+<template id="phases">
+  <h2>3 · Read the phase</h2>
+  <svg width="1640" height="520" viewBox="0 0 1640 520">
+    <defs><marker id="arrow-ph" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <text x="0" y="30" fill="#8ea2c0" font-size="24">tap</text>
+    <text x="1640" y="30" fill="#8ea2c0" font-size="24" text-anchor="end">next paint</text>
+    <rect x="0" y="50" width="520" height="100" rx="14" fill="#221b0d" stroke="#f5b544" stroke-width="3"/>
+    <text x="260" y="112" fill="#e8eef8" font-size="30" font-weight="600" text-anchor="middle">Input delay</text>
+    <rect x="560" y="50" width="520" height="100" rx="14" fill="#0f2233" stroke="#38bdf8" stroke-width="3"/>
+    <text x="820" y="112" fill="#e8eef8" font-size="30" font-weight="600" text-anchor="middle">Processing</text>
+    <rect x="1120" y="50" width="520" height="100" rx="14" fill="#121b2f" stroke="#4ade80" stroke-width="3"/>
+    <text x="1380" y="112" fill="#e8eef8" font-size="30" font-weight="600" text-anchor="middle">Presentation delay</text>
+    <g class="item">
+      <text x="0" y="210" fill="#8ea2c0" font-size="22">Cause</text>
+      <text x="0" y="250" fill="#e8eef8" font-size="24">The main thread was busy:</text>
+      <text x="0" y="284" fill="#e8eef8" font-size="24">long tasks, third-party scripts,</text>
+      <text x="0" y="318" fill="#e8eef8" font-size="24">startup work.</text>
+      <text x="560" y="250" fill="#e8eef8" font-size="24">Your handlers and what they</text>
+      <text x="560" y="284" fill="#e8eef8" font-size="24">trigger: signal writes, the</text>
+      <text x="560" y="318" fill="#e8eef8" font-size="24">router, rendering.</text>
+      <text x="1120" y="250" fill="#e8eef8" font-size="24">Style, layout and paint:</text>
+      <text x="1120" y="284" fill="#e8eef8" font-size="24">a DOM that grew with every</text>
+      <text x="1120" y="318" fill="#e8eef8" font-size="24">Load more.</text>
+    </g>
+    <g class="item">
+      <text x="0" y="400" fill="#8ea2c0" font-size="22">Fix</text>
+      <text x="0" y="440" fill="#38bdf8" font-size="24">Break up long tasks;</text>
+      <text x="0" y="474" fill="#38bdf8" font-size="24">yield to the main thread.</text>
+      <text x="560" y="440" fill="#38bdf8" font-size="24">Do less per keystroke;</text>
+      <text x="560" y="474" fill="#38bdf8" font-size="24">debounce more than the request.</text>
+      <text x="1120" y="440" fill="#38bdf8" font-size="24">Shrink the DOM: paginate,</text>
+      <text x="1120" y="474" fill="#38bdf8" font-size="24">virtualize, content-visibility.</text>
+    </g>
+  </svg>
+</template>
+<section id="phases-cause" data-part="9" data-cue="Third, read the phase" data-template="phases" data-show="1"></section>
+
+<section id="keystroke" data-part="9" data-cue="In Coursewright, each keystroke updates a signal">
+  <h2>What one keystroke does</h2>
+  <div class="file">apps/web/src/app/features/catalog/catalog-page.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2,4,7">protected onSearch(value: string): void {
+  this.query.set(value);
+  // replaceUrl: one history entry for the page, not one per keystroke.
+  void this.router.navigate([], {
+    relativeTo: this.route,
+    queryParams: { q: value || null },
+    replaceUrl: true,
+  });
+}</pre>
+  <p class="small muted">Cheap on a laptop. Measure it on a phone before you decide.</p>
+</section>
+
+<section id="phases-fix" data-part="9" data-cue="Then fix by phase" data-template="phases" data-show="2"></section>
+
+<section id="production" data-part="9" data-cue="What production would add">
+  <h2>What production would add</h2>
+  <ul>
+    <li>Server rendering with incremental hydration for public catalog pages</li>
+    <li>Optimized, responsive images</li>
+    <li>Lighthouse checks in CI on key pages</li>
+    <li>Attribution and device class in the RUM data</li>
+  </ul>
+</section>
+
+<!-- ───────────── Traps ───────────── -->
+<section id="traps" data-part="10" data-cue="Measuring only with Lighthouse on a fast laptop">
+  <h2>Traps</h2>
+  <ul class="small">
+    <li>Measuring only with Lighthouse on a fast laptop</li>
+    <li>Raising the budget every time it fails</li>
+    <li>Re-exporting something heavy from a barrel</li>
+    <li>Deferring content above the fold</li>
+    <li>Tracking list items by index</li>
+    <li>OFFSET pagination behind an infinite scroll</li>
+    <li>Ten thousand rows in the DOM</li>
+    <li>Loading monitoring or third-party scripts eagerly</li>
+  </ul>
+</section>
+
+<!-- ───────────── Interview drill ───────────── -->
+<section id="drill" data-part="11" data-cue="Let's practise">
+  <div class="kicker">Interview drill</div>
+  <h1>Five questions</h1>
+  <p class="lead">After each question, pause and answer out loud. Then compare with the model answer.</p>
+</section>
+
+<section id="q1" data-part="11" data-cue="INP is poor on the catalog page for low-end Android devices. How do you find the cause?" data-voice="interviewer">
+  <div class="kicker">Question 1 of 5</div>
+  <p class="question">INP is poor on the catalog page for low-end Android devices. How do you find the cause?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a1" data-part="11" data-cue="Start in the field: the seventy-fifth percentile INP">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Field first: p75 INP for the route, by device class</li>
+    <li>Attribution: which element, which phase</li>
+    <li>Reproduce in a throttled trace or on a real phone</li>
+    <li>Input delay → long tasks · processing → handler · presentation → DOM</li>
+    <li>Confirm the fix in field data</li>
+  </ul>
+</section>
+
+<section id="q2" data-part="11" data-cue="What goes in the initial bundle, and how do you keep it there?" data-voice="interviewer">
+  <div class="kicker">Question 2 of 5</div>
+  <p class="question">What goes in the initial bundle, and how do you keep it there?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a2" data-part="11" data-cue="Only what the first render of every page needs">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Framework, shell, auth, HttpClient, the shell's primitives</li>
+    <li>Lazy routes; @defer below the fold</li>
+    <li>Heavy dependencies behind their own entry point</li>
+    <li>Monitoring imported lazily</li>
+    <li>A budget that fails CI: 350 kB warn, 500 kB fail; today ~333 kB</li>
+  </ul>
+</section>
+
+<section id="q3" data-part="11" data-cue="When would you use a deferred block, and when a lazy route?" data-voice="interviewer">
+  <div class="kicker">Question 3 of 5</div>
+  <p class="question">When would you use a deferred block, and when a lazy route?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a3" data-part="11" data-cue="A lazy route splits by URL. It's a page users navigate to">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Lazy route: splits by URL; a page with its guard and title</li>
+    <li>@defer: splits inside a page, on a trigger</li>
+    <li>Placeholder and loading states; prefetch</li>
+    <li>Coursewright defers the enrollments panel</li>
+    <li>Never above the fold</li>
+  </ul>
+</section>
+
+<section id="q4" data-part="11" data-cue="Why is an offset of ten thousand slow, and what does a keyset cursor need from the index?" data-voice="interviewer">
+  <div class="kicker">Question 4 of 5</div>
+  <p class="question">Why is OFFSET 10000 slow, and what does a keyset cursor need from the index?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a4" data-part="11" data-cue="With an offset, the database walks and discards">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>OFFSET reads and discards every skipped row</li>
+    <li>Inserts shift pages: duplicates and gaps</li>
+    <li>Keyset seeks past the last row's sort key</li>
+    <li>Index: equality filter, sort columns, unique tiebreaker</li>
+    <li>(tenant_id, title, id); a test walks every page</li>
+  </ul>
+</section>
+
+<section id="q5" data-part="11" data-cue="How would you render a list of ten thousand rows?" data-voice="interviewer">
+  <div class="kicker">Question 5 of 5</div>
+  <p class="question">How would you render a list of 10,000 rows?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a5" data-part="11" data-cue="Mostly, I wouldn't">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Page on the server with a keyset cursor</li>
+    <li>If truly needed: virtualize (CDK viewport)</li>
+    <li>Costs: heights, find in page, screen readers</li>
+    <li>Track by ID; heavy work on the server</li>
+    <li>content-visibility as a middle ground</li>
+  </ul>
+</section>
+
+<!-- ───────────── Recap ───────────── -->
+<template id="recap">
+  <h2>Five things to remember</h2>
+  <ol class="recap">
+    <li class="item">Measure in the field: LCP, INP, CLS at p75. web-vitals, loaded lazily.</li>
+    <li class="item">Initial bundle = framework, shell, core. Budgets fail the build. ~333 kB raw, ~92 kB over the wire.</li>
+    <li class="item">Routes split by URL, @defer inside a page. Heavy code gets its own entry point.</li>
+    <li class="item">Rendering is work: zoneless and signals, track by ID, no 10,000-row DOM.</li>
+    <li class="item">Keyset needs a matching index. Poor INP: field, trace, fix by phase.</li>
+  </ol>
+</template>
+<section id="recap-0" data-part="12" data-cue="Five things to remember" data-template="recap" data-show="0"></section>
+<section id="recap-1" data-part="12" data-cue="One: measure what users feel, in the field" data-template="recap" data-show="1"></section>
+<section id="recap-2" data-part="12" data-cue="Two: the initial bundle is the framework" data-template="recap" data-show="2"></section>
+<section id="recap-3" data-part="12" data-cue="Three: lazy routes split by URL" data-template="recap" data-show="3"></section>
+<section id="recap-4" data-part="12" data-cue="Four: rendering is work" data-template="recap" data-show="4"></section>
+<section id="recap-5" data-part="12" data-cue="Five: keyset pagination costs the same at any depth" data-template="recap" data-show="5"></section>
+
+<section id="next" data-part="12" data-cue="In the next lesson">
+  <div class="kicker">Next</div>
+  <h1>07 · Contract-First REST from the Frontend</h1>
+  <p class="lead">How the web app and the BFF agree on every field and status code, and how you change a field without breaking anyone.</p>
+</section>
+
+<script src="../assets/slides.js"></script>
+</body>
+</html>

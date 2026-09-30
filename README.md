@@ -27,6 +27,8 @@ apps/web/           Angular 22 (zoneless, standalone, OnPush) on :4200
   src/app/features/   login, catalog, course, reports, not-found (all lazy-loaded)
   e2e/                Playwright + axe
 docs/               study guide + ADRs 0001–0006
+  instructional/      12 narrated interview-prep lessons (audio, video, slides) + question bank
+tools/              .NET scripts that build the lesson audio and video (not needed to run the app)
 .github/workflows/  CI: contract drift, lint, test, build (budgets), E2E
 ```
 
@@ -82,7 +84,8 @@ The first `pnpm e2e` needs a browser: `pnpm --filter @coursewright/web exec play
 
 1. [`docs/study-guide.md`](docs/study-guide.md): one section per technical area, with files, talking points and drills.
 2. [`docs/adr/`](docs/adr/): the six decisions that shape the code, with their trade-offs.
-3. [`contracts/openapi.yaml`](contracts/openapi.yaml): read the API before reading either side of it.
+3. [`docs/instructional/`](docs/instructional/): twelve ~21-minute lessons (audio and video) that walk the frontend area by area, each ending in an interview drill. The questions are collected in [`interview-questions.md`](docs/instructional/interview-questions.md).
+4. [`contracts/openapi.yaml`](contracts/openapi.yaml): read the API before reading either side of it.
 
 ## Out of scope, on purpose
 

@@ -1,0 +1,645 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 12 Slides</title>
+<!--
+  Slides for the lesson 12 video. Each <section> is one slide. data-cue is a phrase from script.md:
+  tools/instructional-video/build.cs shows the slide from the moment the narration reaches that phrase.
+  Open this file in a browser and use the arrow keys to step through the deck.
+-->
+<link rel="stylesheet" href="../assets/slides.css">
+</head>
+<body data-lesson-number="12" data-lesson-title="Evolving a Large Frontend" data-parts="Introduction|The questions|Decisions, written down|Boundaries, then strangle|Debt as a portfolio|What the BFF is for|A new field|The AWS mapping|Disagreeing|Reviews that teach|Raising the bar|The multi-sprint story|The series|Traps|Interview drill|Recap">
+
+<!-- ───────────── Intro ───────────── -->
+<section id="title" data-part="0">
+  <div class="kicker">Coursewright frontend · Lesson 12 · the last lesson</div>
+  <h1>Evolving a<br>Large Frontend</h1>
+  <p class="lead">The job around the code: debt, strangling, cross-stack changes, disagreements, reviews, and the multi-sprint story.</p>
+</section>
+
+<!-- ───────────── Questions ───────────── -->
+<section id="questions" data-part="1" data-cue="The questions this lesson answers">
+  <h2>The questions this lesson answers</h2>
+  <ul>
+    <li>Tell me about a multi-sprint frontend initiative you led.</li>
+    <li>Tech debt or a feature: how do you decide?</li>
+    <li>You disagree with a senior backend engineer about an API shape.</li>
+    <li>How do you raise the bar without becoming the bottleneck?</li>
+    <li>A new catalog field lives in another team's PHP service. Every layer?</li>
+  </ul>
+</section>
+
+<section id="thesis" data-part="1" data-cue="Keep one sentence in your head while you listen">
+  <div class="kicker">The thesis</div>
+  <p class="quote">Make the good path <span class="accent">executable</span>, change things in <span class="accent">small reversible steps</span>, and <span class="accent">write down why</span>.</p>
+  <div class="cols3" style="margin-top:56px">
+    <div class="card"><h3>Executable</h3><p>The build says no.</p></div>
+    <div class="card"><h3>Reversible</h3><p>Route by route, behind a flag.</p></div>
+    <div class="card"><h3>Written down</h3><p>ADRs, not memory.</p></div>
+  </div>
+</section>
+
+<!-- ───────────── Decisions, written down ───────────── -->
+<section id="adr-list" data-part="2" data-cue="Start with the six architecture decision records">
+  <h2>Six decisions, written down</h2>
+  <table>
+    <tr><th>ADR</th><th>Decision</th></tr>
+    <tr><td>0001</td><td>One pnpm workspace, with boundaries enforced by lint</td></tr>
+    <tr><td>0002</td><td>Contract-first REST with a hand-written OpenAPI document</td></tr>
+    <tr><td>0003</td><td>Access token in memory, refresh token in an httpOnly cookie</td></tr>
+    <tr><td>0004</td><td>Signals for state, RxJS for events over time</td></tr>
+    <tr><td>0005</td><td>Long-running work as jobs: 202, server-sent events, polling fallback</td></tr>
+    <tr><td>0006</td><td>Trace context from the browser, structured logs, real-user metrics</td></tr>
+  </table>
+  <div class="file" style="margin-top:28px">docs/adr/</div>
+</section>
+
+<section id="adr-shape" data-part="2" data-cue="Each has the same shape">
+  <h2>The same shape, every time</h2>
+  <div class="file">docs/adr/0006-observability.md · excerpt</div>
+  <pre class="code tight" data-lang="md" data-mark="9,13">- **Status:** Accepted
+- **Date:** 2026-09-30
+- **Deciders:** Coursewright web team
+
+## Context
+…
+## Decision
+…
+## Consequences
+
+**Positive**
+…
+**Negative**</pre>
+</section>
+
+<section id="negatives" data-part="2" data-cue="The part worth copying is the negative consequences">
+  <h2>Copy this: the negative consequences</h2>
+  <table>
+    <tr><th>ADR</th><th>What the decision costs (quoted)</th></tr>
+    <tr><td>0001</td><td>No project graph and no "affected" builds: CI runs everything.</td></tr>
+    <tr><td>0002</td><td>The YAML is verbose, and writing it first feels slower …</td></tr>
+    <tr><td>0003</td><td>Multiple tabs each hold their own access token, and they race on rotation.</td></tr>
+    <tr><td>0005</td><td>Jobs live in one process's memory. A restart loses them …</td></tr>
+    <tr><td>0006</td><td>Logs aren't traces: there are no spans, durations or cross-service waterfalls yet.</td></tr>
+  </table>
+  <p class="small muted" style="margin-top:28px">ADR-0001, "When to revisit": more than one app, or CI time dominated by work a change didn't touch.</p>
+</section>
+
+<!-- ───────────── Boundaries, then strangle ───────────── -->
+<section id="ratchets" data-part="3" data-cue="Lesson one showed the lint rules">
+  <h2>Four rules the build enforces</h2>
+  <div class="grid7" style="grid-template-columns:repeat(2,1fr)">
+    <div class="card"><h3>pnpm lint</h3><p>The architecture: layers, one rule per feature, template accessibility.</p></div>
+    <div class="card"><h3>contracts:check + contract test</h3><p>The API: types can't drift, and the server can't lie.</p></div>
+    <div class="card"><h3>angular.json budgets</h3><p>Performance: the initial bundle fails the build at 500 kB.</p></div>
+    <div class="card"><h3>axe in Playwright</h3><p>The accessibility basics, on the journeys that matter.</p></div>
+  </div>
+</section>
+
+<section id="ratchet-rollout" data-part="3" data-cue="That's why boundaries come before refactors">
+  <h2>Boundaries before refactors</h2>
+  <div class="steps">
+    <div class="step on"><span class="num">1</span>Add the rule as a warning</div>
+    <div class="step on"><span class="num">2</span>Count the violations</div>
+    <div class="step on"><span class="num">3</span>Fix them in batches</div>
+    <div class="step on"><span class="num">4</span>Make it an error</div>
+  </div>
+  <p class="muted" style="margin-top:48px">Refactor first, and the codebase erodes back behind you. Make the rule executable first, and every improvement stays made.</p>
+</section>
+
+<section id="strangle" data-part="3" data-cue="To replace something big, strangle it">
+  <h2>Strangle, don't rewrite</h2>
+  <div class="file">Sketch · not in this repo · a new catalog page next to the old one</div>
+  <svg width="1640" height="400" viewBox="0 0 1640 400">
+    <defs><marker id="arrow-s" markerUnits="userSpaceOnUse" markerWidth="22" markerHeight="22" refX="20" refY="11" orient="auto"><path d="M0,0 L22,11 L0,22 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="0" y="140" width="280" height="120" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="140" y="192" fill="#e8eef8" font-size="32" font-weight="600" text-anchor="middle">/catalog</text>
+    <text x="140" y="230" fill="#8ea2c0" font-size="22" text-anchor="middle">the URL never changes</text>
+    <rect x="400" y="140" width="340" height="120" rx="18" fill="#121b2f" stroke="#38bdf8" stroke-width="3"/>
+    <text x="570" y="192" fill="#e8eef8" font-size="32" font-weight="600" text-anchor="middle">Router</text>
+    <text x="570" y="230" fill="#8ea2c0" font-size="22" text-anchor="middle">canMatch (lesson 04)</text>
+    <rect x="960" y="10" width="680" height="130" rx="18" fill="#0f2233" stroke="#38bdf8" stroke-width="3"/>
+    <text x="1300" y="66" fill="#e8eef8" font-size="30" font-weight="600" text-anchor="middle">New catalog page</text>
+    <text x="1300" y="106" fill="#8ea2c0" font-size="22" text-anchor="middle">matched when the tenant's flag is on</text>
+    <rect x="960" y="260" width="680" height="130" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="1300" y="316" fill="#e8eef8" font-size="30" font-weight="600" text-anchor="middle">Old catalog page</text>
+    <text x="1300" y="356" fill="#8ea2c0" font-size="22" text-anchor="middle">everyone else falls through to it</text>
+    <line x1="285" y1="200" x2="395" y2="200" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-s)"/>
+    <path d="M745,180 C850,180 850,75 955,75" fill="none" stroke="#38bdf8" stroke-width="4" marker-end="url(#arrow-s)"/>
+    <path d="M745,220 C850,220 850,325 955,325" fill="none" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-s)"/>
+    <text x="850" y="60" fill="#38bdf8" font-size="22" text-anchor="middle">flag on</text>
+    <text x="850" y="358" fill="#8ea2c0" font-size="22" text-anchor="middle">flag off</text>
+  </svg>
+  <p class="small muted">Flag off is the rollback. When every tenant has moved, delete the old folder.</p>
+</section>
+
+<section id="strangle-code" data-part="3" data-cue="A new catalog page could sit next to the old one">
+  <h2>Two routes, one path</h2>
+  <div class="file">Sketch · not in this repo · app.routes.ts</div>
+  <pre class="code tight" data-lang="ts" data-mark="3,4">{
+  path: 'catalog',
+  canMatch: [authGuard, flagGuard('newCatalog')],
+  loadComponent: () =&gt; import('./features/catalog-v2/catalog-page').then((m) =&gt; m.CatalogPage),
+},
+{
+  path: 'catalog',
+  canMatch: [authGuard],
+  loadComponent: () =&gt; import('./features/catalog/catalog-page').then((m) =&gt; m.CatalogPage),
+},</pre>
+  <p><span class="amber">A rewrite</span> stops feature work and delivers nothing until the end. <span class="accent">A strangler</span> ships each route, reversibly, from the first.</p>
+</section>
+
+<!-- ───────────── Debt as a portfolio ───────────── -->
+<section id="portfolio" data-part="4" data-cue="Technical debt isn't one thing to be for or against">
+  <h2>Technical debt as a portfolio</h2>
+  <div class="cols3">
+    <div class="card"><h3>1 · Name it</h3><p>Each item, written down.</p></div>
+    <div class="card"><h3>2 · Estimate the interest</h3><p>Incidents it causes. Features it slows.</p></div>
+    <div class="card modern"><h3>3 · Pay the highest</h3><p>Alongside feature work, not instead of it.</p></div>
+  </div>
+</section>
+
+<section id="register" data-part="4" data-cue="Coursewright's ADRs already hold a debt register">
+  <h2>Coursewright's debt register</h2>
+  <table>
+    <tr><th>Item</th><th>Interest today</th><th>Interest when …</th></tr>
+    <tr><td>Jobs in memory · 0005</td><td>Almost none: one BFF instance</td><td class="amber">a second instance is planned: it blocks</td></tr>
+    <tr><td>Tabs race · 0003</td><td>A user with two tabs can be signed out</td><td>measure how often first</td></tr>
+    <tr><td>RUM not aggregated · 0006</td><td>No alerts on web vitals</td><td class="amber">canary rollback needs it</td></tr>
+    <tr><td>No oasdiff · 0002</td><td>Review catches breaking changes, mostly</td><td>more consumers arrive</td></tr>
+  </table>
+  <p class="small muted" style="margin-top:28px">The interest changes with the roadmap.</p>
+</section>
+
+<section id="debt-or-feature" data-part="4" data-cue="That's the answer to">
+  <h2>"Debt or feature?" Rarely either-or</h2>
+  <ul class="checks">
+    <li>Attach debt to the feature work that touches it</li>
+    <li>Keep a steady share of each sprint for the rest</li>
+    <li>Explain it in business terms: incidents avoided, features unblocked</li>
+  </ul>
+</section>
+
+<!-- ───────────── What the BFF is for ───────────── -->
+<section id="app-ts" data-part="5" data-cue="Now the cross-stack part of the role">
+  <h2>The whole BFF, in one function</h2>
+  <div class="file">apps/bff/src/app.ts · condensed</div>
+  <pre class="code tight" data-lang="ts" data-mark="6,10">const app = Fastify({ logger, ...traceLogging });
+// …
+await app.register(cookie);
+registerObservability(app);
+registerProblemHandlers(app);
+for (const schema of componentSchemas(loadContract())) app.addSchema(schema);
+// …
+await app.register(
+  async (api) =&gt; {
+    registerAuthentication(api, tokens);
+    // …
+  },
+  { prefix: '/api' },
+);</pre>
+  <p class="small muted">Then the routes: auth, courses, enrollments, reports, rum, health. Each needs a token unless it's marked public.</p>
+</section>
+
+<section id="bff-job" data-part="5" data-cue="That file shows what a BFF is for">
+  <h2>What a BFF is for</h2>
+  <div class="cols">
+    <div class="card modern">
+      <h3>It is</h3>
+      <ul>
+        <li>APIs shaped for one frontend</li>
+        <li>The owner of the session</li>
+        <li>Auth and tenancy at the edge</li>
+        <li>An aggregator of platform services</li>
+      </ul>
+    </div>
+    <div class="card legacy">
+      <h3 class="amber">It isn't</h3>
+      <p>A second business-logic tier.</p>
+      <p class="muted">It adapts, combines and protects.</p>
+    </div>
+  </div>
+</section>
+
+<section id="db-index" data-part="5" data-cue="The relational basics show up here too">
+  <h2>Indexes that match the query</h2>
+  <div class="file">apps/bff/src/db.ts · excerpt</div>
+  <pre class="code tight" data-lang="sql" data-mark="3,10">-- Keyset pagination seeks to (title, id) within one tenant and reads forward in that order.
+-- This index makes each page a range scan, however deep the page is.
+CREATE INDEX courses_tenant_title_id ON courses (tenant_id, title, id);
+-- …
+CREATE TABLE enrollments (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL REFERENCES users (id),
+  course_id   TEXT NOT NULL REFERENCES courses (id),
+  enrolled_at TEXT NOT NULL,
+  UNIQUE (user_id, course_id)
+);</pre>
+</section>
+
+<section id="check-not-guarantee" data-part="5" data-cue="checks for an existing enrollment and answers four-oh-nine">
+  <h2>The check isn't the guarantee</h2>
+  <div class="file">apps/bff/src/routes/enrollments.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,2,6">const alreadyEnrolled = db
+  .prepare('SELECT 1 FROM enrollments WHERE user_id = ? AND course_id = ?')
+  .get(userId, courseId);
+if (alreadyEnrolled) {
+  return sendProblem(reply, {
+    status: 409,
+    type: '/problems/already-enrolled',
+    title: 'Already enrolled',
+    detail: `You're already enrolled in ${course.title}.`,
+  });
+}</pre>
+  <p class="small muted">Two instances, two requests: both can pass the check. <span class="accent">UNIQUE (user_id, course_id)</span> stops the second insert.</p>
+</section>
+
+<!-- ───────────── A new field ───────────── -->
+<section id="new-field" data-part="6" data-cue="Here's the cross-stack drill">
+  <div class="kicker">Example: a course's average rating</div>
+  <h2>A new field, through every layer</h2>
+  <svg width="1640" height="360" viewBox="0 0 1640 360">
+    <defs><marker id="arrow-f" markerUnits="userSpaceOnUse" markerWidth="22" markerHeight="22" refX="20" refY="11" orient="auto"><path d="M0,0 L22,11 L0,22 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="0" y="60" width="370" height="200" rx="18" fill="#221b0d" stroke="#f5b544" stroke-width="3"/>
+    <text x="185" y="118" fill="#f5b544" font-size="26" text-anchor="middle">1 · another team</text>
+    <text x="185" y="162" fill="#e8eef8" font-size="32" font-weight="600" text-anchor="middle">PHP service</text>
+    <text x="185" y="205" fill="#8ea2c0" font-size="21" text-anchor="middle">API Resource: + optional field</text>
+    <text x="185" y="235" fill="#8ea2c0" font-size="21" text-anchor="middle">consumer contract test</text>
+    <rect x="423" y="60" width="370" height="200" rx="18" fill="#0f2233" stroke="#38bdf8" stroke-width="3"/>
+    <text x="608" y="118" fill="#38bdf8" font-size="26" text-anchor="middle">2 · first in this repo</text>
+    <text x="608" y="162" fill="#e8eef8" font-size="32" font-weight="600" text-anchor="middle">openapi.yaml</text>
+    <text x="608" y="205" fill="#8ea2c0" font-size="21" text-anchor="middle">optional field</text>
+    <text x="608" y="235" fill="#8ea2c0" font-size="21" text-anchor="middle">pnpm contracts:generate</text>
+    <rect x="846" y="60" width="370" height="200" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="1031" y="118" fill="#8ea2c0" font-size="26" text-anchor="middle">3</text>
+    <text x="1031" y="162" fill="#e8eef8" font-size="32" font-weight="600" text-anchor="middle">BFF</text>
+    <text x="1031" y="205" fill="#8ea2c0" font-size="21" text-anchor="middle">maps platform → contract</text>
+    <text x="1031" y="235" fill="#8ea2c0" font-size="21" text-anchor="middle">platform naming stays out</text>
+    <rect x="1270" y="60" width="370" height="200" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="1455" y="118" fill="#8ea2c0" font-size="26" text-anchor="middle">4</text>
+    <text x="1455" y="162" fill="#e8eef8" font-size="32" font-weight="600" text-anchor="middle">Web app</text>
+    <text x="1455" y="205" fill="#8ea2c0" font-size="21" text-anchor="middle">type arrives, generated</text>
+    <text x="1455" y="235" fill="#8ea2c0" font-size="21" text-anchor="middle">absent case tested</text>
+    <line x1="372" y1="160" x2="419" y2="160" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-f)"/>
+    <line x1="795" y1="160" x2="842" y2="160" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-f)"/>
+    <line x1="1218" y1="160" x2="1266" y2="160" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-f)"/>
+    <text x="820" y="335" fill="#8ea2c0" font-size="26" text-anchor="middle">Then: release behind a flag · make it required once the platform guarantees it</text>
+  </svg>
+</section>
+
+<section id="laravel" data-part="6" data-cue="Start in the platform service, and read before you ask">
+  <h2>Read their service before you ask</h2>
+  <div class="steps">
+    <div class="step"><span class="num">1</span>Route file</div>
+    <div class="step"><span class="num">2</span>Controller</div>
+    <div class="step"><span class="num">3</span>Service or policy<span class="tag">authorization</span></div>
+    <div class="step"><span class="num">4</span>Eloquent model</div>
+    <div class="step on"><span class="num">5</span>API Resource<span class="tag">add the field here</span></div>
+  </div>
+  <p class="muted" style="margin-top:36px">A typical Laravel service (not in this repo). Ask for an additive, optional field; offer the pull request; add a consumer contract test.</p>
+</section>
+
+<section id="contract-first" data-part="6" data-cue="Then the contract">
+  <h2>The contract first, and it enforces the order</h2>
+  <div class="file">contracts/openapi.yaml · excerpt</div>
+  <pre class="code tight" data-lang="yaml" data-mark="3,4">    CourseSummary:
+      type: object
+      required: [id, title, summary, level, durationMinutes]
+      additionalProperties: false</pre>
+  <div class="file">Sketch · not in this repo · the new property, left out of required</div>
+  <pre class="code tight" data-lang="yaml">        averageRating:
+          type: number
+          minimum: 0
+          maximum: 5</pre>
+  <p class="small muted">Optional while the platform rolls out. If the BFF sent it first, the contract test would fail.</p>
+</section>
+
+<section id="bff-web" data-part="6" data-cue="Then the BFF maps the field">
+  <h2>The BFF maps; the web type follows</h2>
+  <div class="file">apps/bff/src/routes/courses.ts</div>
+  <pre class="code tight" data-lang="ts" data-mark="7">function toCourseSummary(row: CourseSummaryRow): CourseSummary {
+  return {
+    id: row.id,
+    title: row.title,
+    summary: row.summary,
+    level: row.level,
+    durationMinutes: row.duration_minutes,
+  };
+}</pre>
+  <div class="file">apps/web/src/app/core/api/models.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts">export type CourseSummary = Schemas['CourseSummary'];</pre>
+  <p class="small muted">The mapping keeps the platform's naming out of the frontend's contract. No hand-written web type changes.</p>
+</section>
+
+<section id="field-order" data-part="6" data-cue="Release it behind a flag">
+  <h2>Additive, in order, reversible</h2>
+  <div class="steps">
+    <div class="step done"><span class="num">1</span>Platform: optional field<span class="tag">their PR</span></div>
+    <div class="step done"><span class="num">2</span>openapi.yaml, then generate<span class="tag">contract</span></div>
+    <div class="step done"><span class="num">3</span>BFF maps it<span class="tag">contract test</span></div>
+    <div class="step done"><span class="num">4</span>Web renders; absent case<span class="tag">unit test</span></div>
+    <div class="step on"><span class="num">5</span>Release behind a flag<span class="tag">per tenant</span></div>
+    <div class="step"><span class="num">6</span>Required, once guaranteed<span class="tag">later change</span></div>
+  </div>
+</section>
+
+<!-- ───────────── The AWS mapping ───────────── -->
+<section id="aws" data-part="7" data-cue="Interviewers will also ask how this would run in the cloud">
+  <h2>How Coursewright would run on AWS</h2>
+  <table>
+    <tr><th>This repo</th><th>AWS</th></tr>
+    <tr><td>JobQueue</td><td>SQS with a DLQ, fed by SNS or EventBridge</td></tr>
+    <tr><td>CSV result</td><td>An S3 object behind a presigned URL</td></tr>
+    <tr><td>Static web app</td><td>S3 + CloudFront</td></tr>
+    <tr><td>BFF</td><td>Containers on ECS/Fargate, or Lambda</td></tr>
+    <tr><td>Secrets</td><td>Secrets Manager</td></tr>
+    <tr><td>Logs and traces</td><td>CloudWatch or an OTel backend</td></tr>
+  </table>
+  <p class="small muted" style="margin-top:28px">Each seam in the code (the queue interface, the trace header, the contract) is where a managed service plugs in.</p>
+</section>
+
+<!-- ───────────── Disagreeing ───────────── -->
+<section id="disagree" data-part="8" data-cue="Suppose a senior backend engineer wants">
+  <h2>You disagree about an API shape</h2>
+  <div class="cols">
+    <div class="card legacy"><h3 class="amber">Their proposal</h3><p>Offset pagination. Or return everything, and let the frontend filter.</p></div>
+    <div class="card"><h3>Your concern</h3><p>Unstable pages under inserts, cost at depth, payloads that grow with the tenant.</p></div>
+  </div>
+  <p class="muted" style="margin-top:40px">Not a debate to win. A decision to make, and record.</p>
+</section>
+
+<section id="disagree-steps" data-part="8" data-cue="First, understand their constraints before arguing yours">
+  <h2>Resolve it on the contract</h2>
+  <div class="steps">
+    <div class="step"><span class="num">1</span>Understand their constraints</div>
+    <div class="step"><span class="num">2</span>A PR on openapi.yaml, both shapes</div>
+    <div class="step"><span class="num">3</span>Agree the criteria first</div>
+    <div class="step"><span class="num">4</span>Reversible or irreversible?</div>
+    <div class="step"><span class="num">5</span>The BFF can adapt the shape</div>
+    <div class="step on"><span class="num">6</span>The owner decides; commit; ADR</div>
+  </div>
+</section>
+
+<section id="adr2-criteria" data-part="8" data-cue="ADR two's table is a ready-made list">
+  <h2>Criteria, ready-made</h2>
+  <table>
+    <tr><th>Concern</th><th>Choice</th><th>Why</th></tr>
+    <tr><td>Errors</td><td>RFC 9457 problem+json, with traceId</td><td>One error shape for every endpoint</td></tr>
+    <tr><td>Pagination</td><td>Keyset (cursor), ordered by (title, id)</td><td>Stable under inserts, and constant cost at any depth, unlike OFFSET</td></tr>
+    <tr><td>Tenancy</td><td>The tenant comes from the token; another tenant's resource is a 404</td><td>A 403 would confirm that the resource exists</td></tr>
+  </table>
+  <div class="file" style="margin-top:28px">docs/adr/0002-contract-first-rest.md · excerpt</div>
+</section>
+
+<!-- ───────────── Reviews that teach ───────────── -->
+<section id="reviews" data-part="9" data-cue="Code review is where a senior engineer's standards spread">
+  <h2>Reviews that teach</h2>
+  <div class="cols3">
+    <div class="card"><h3>Explain why</h3><p>Link the ADR, instead of stating a preference.</p></div>
+    <div class="card"><h3>Must fix vs consider</h3><p>The author knows what blocks the merge.</p></div>
+    <div class="card"><h3>Automate taste</h3><p>Prettier formats; lint enforces boundaries and template accessibility.</p></div>
+  </div>
+  <p class="muted" style="margin-top:40px">Humans spend their attention on design.</p>
+</section>
+
+<section id="pr-example" data-part="9" data-cue="Here's a worked example">
+  <h2>A new feature imports from the catalog</h2>
+  <div class="file">Sketch · not in this repo · the pull request's import</div>
+  <pre class="code tight" data-lang="ts">import { CatalogStore } from '../catalog/catalog.store';</pre>
+  <div class="card legacy" style="margin-top:12px">
+    <p class="small muted" style="margin-bottom:12px">pnpm lint (the message comes from apps/web/eslint.config.js)</p>
+    <p class="amber small">error  '../catalog/catalog.store' import is restricted from being used by a pattern. A feature must not import another feature or the shell. Move shared code to core or the design system  no-restricted-imports</p>
+  </div>
+  <p class="muted" style="margin-top:32px">A new feature folder is covered automatically: <span class="accent">featureNames()</span> reads the folder.</p>
+</section>
+
+<section id="lint-cant" data-part="9" data-cue="It's about the decision lint can't make">
+  <h2>The decision lint can't make</h2>
+  <div class="cols3">
+    <div class="card"><h3>Presentational?</h3><p>Down into the design system, with plain inputs.</p></div>
+    <div class="card"><h3>Behaviour?</h3><p>Loading courses, say: down into core.</p></div>
+    <div class="card legacy"><h3 class="amber">Needs its internals?</h3><p>Maybe it isn't a new feature at all.</p></div>
+  </div>
+</section>
+
+<section id="review-comment" data-part="9" data-cue="Your comment names that choice">
+  <h2>The review comment</h2>
+  <div class="file">Sketch · not in this repo · two comments on the pull request</div>
+  <div class="card legacy" style="margin-bottom:28px">
+    <p><span class="amber">Must fix:</span> loading courses is shared behaviour, so it moves down into core instead of being imported from the catalog feature. See ADR-0001.</p>
+  </div>
+  <div class="card">
+    <p><span class="accent">Consider:</span> naming the folder after what the learner does, not the screen.</p>
+  </div>
+</section>
+
+<!-- ───────────── Raising the bar ───────────── -->
+<section id="queue" data-part="10" data-cue="If every important pull request needs your approval">
+  <div class="kicker">Raising the bar</div>
+  <p class="quote">You haven't raised the bar. <span class="amber">You've become a queue.</span></p>
+</section>
+
+<section id="scale-out" data-part="10" data-cue="Put the standard in tooling wherever it fits">
+  <h2>Scale yourself out</h2>
+  <ul class="checks">
+    <li>Tooling says no, so you don't have to</li>
+    <li>Reference implementations: the catalog store (ADR-0004)</li>
+    <li>Templates for pull requests and ADRs</li>
+    <li>Spread review ownership across several people</li>
+    <li>Accessibility and tests in the definition of done</li>
+  </ul>
+</section>
+
+<section id="pairing" data-part="10" data-cue="Pair on someone's first change in an unfamiliar area">
+  <h2>Pair, review, step back</h2>
+  <div class="timeline">
+    <div class="card modern"><h3>First change</h3><p>Pair on it.</p></div>
+    <div class="card"><h3>Second change</h3><p>Review it.</p></div>
+    <div class="card"><h3>After that</h3><p>Spot-check.</p></div>
+  </div>
+  <p class="accent" style="margin-top:48px">The measure: quality holds while you're on holiday.</p>
+</section>
+
+<!-- ───────────── The multi-sprint story ───────────── -->
+<section id="star" data-part="11" data-cue="Now the behavioural question">
+  <h2>STAR, in about two minutes</h2>
+  <div class="grid7">
+    <div class="card"><h3>Situation</h3><p>What was wrong, and for whom.</p></div>
+    <div class="card"><h3>Task</h3><p>What you set out to change.</p></div>
+    <div class="card"><h3>Action</h3><p>Sprint by sprint, each one shippable.</p></div>
+    <div class="card"><h3>Result</h3><p>Measured. And what you'd change.</p></div>
+  </div>
+  <p class="amber" style="margin-top:40px">Use a real initiative of your own.</p>
+</section>
+
+<section id="illustration" data-part="11" data-cue="Here's the shape, as an illustration built on Coursewright">
+  <h2>The shape, as an illustration</h2>
+  <div class="file">Illustration · built on Coursewright · not anyone's history</div>
+  <table>
+    <tr class="item"><td>Situation</td><td>Features import each other; every change ripples across teams</td></tr>
+    <tr class="item"><td>Task</td><td>Make the boundaries executable, without stopping feature work</td></tr>
+    <tr class="item"><td>Action 1</td><td>Write the ADR; add lint rules as warnings, with messages that teach</td></tr>
+    <tr class="item"><td>Action 2</td><td>Fix violations in batches: shared code moves down to core or the design system</td></tr>
+    <tr class="item"><td>Action 3</td><td>Turn the warnings into errors in CI</td></tr>
+    <tr class="item"><td>Result</td><td>What you measured: violations at zero, and staying there</td></tr>
+  </table>
+</section>
+
+<section id="land" data-part="11" data-cue="Three things make the answer land">
+  <h2>Three things make it land</h2>
+  <div class="cols3">
+    <div class="card"><h3>"I" and "we"</h3><p>"I" for your decisions, "we" for the team's work.</p></div>
+    <div class="card"><h3>Sequencing</h3><p>Each sprint shipped something on its own.</p></div>
+    <div class="card"><h3>A number</h3><p>One you can defend when they probe it.</p></div>
+  </div>
+</section>
+
+<!-- ───────────── The series ───────────── -->
+<section id="series" data-part="12" data-cue="Here's the whole series in five sentences">
+  <h2>The series in five sentences</h2>
+  <ol class="small">
+    <li>Architecture that isn't executable erodes: layers, contracts, budgets and accessibility checks fail the build. <span class="muted">(01, 06, 07, 10)</span></li>
+    <li>Signals hold state, RxJS handles events over time, idempotency makes retries safe. <span class="muted">(02, 03)</span></li>
+    <li>Native elements, managed focus and real routes keep the platform's behaviour, measured by real users. <span class="muted">(04, 05, 06)</span></li>
+    <li>The contract sits between frontend and backend; the server enforces auth, tenancy and long-running work. <span class="muted">(07, 08, 09)</span></li>
+    <li>Every change is small, tested at the right level, reversible, traceable and written down. <span class="muted">(10, 11, 12)</span></li>
+  </ol>
+</section>
+
+<!-- ───────────── Traps ───────────── -->
+<section id="traps" data-part="13" data-cue="Proposing a rewrite">
+  <h2>Traps</h2>
+  <ul class="small">
+    <li>Proposing a rewrite</li>
+    <li>Refactoring before the rule is executable</li>
+    <li>Describing debt as code quality</li>
+    <li>Settling an API argument in a meeting, not on the contract</li>
+    <li>The BFF as a second business-logic tier</li>
+    <li>Being the reviewer on every pull request</li>
+    <li>"We" all the way through, no result, or a story you didn't live</li>
+  </ul>
+</section>
+
+<!-- ───────────── Interview drill ───────────── -->
+<section id="drill" data-part="14" data-cue="Let's practise">
+  <div class="kicker">Interview drill</div>
+  <h1>Five questions</h1>
+  <p class="lead">After each question, pause and answer out loud. Then compare with the model answer.</p>
+</section>
+
+<section id="q1" data-part="14" data-cue="Tell me about a multi-sprint frontend initiative you led." data-voice="interviewer">
+  <div class="kicker">Question 1 of 5</div>
+  <p class="question">Tell me about a multi-sprint frontend initiative you led.</p>
+  <p class="hint">Answer out loud, with a real initiative of your own.</p>
+</section>
+<section id="a1" data-part="14" data-cue="Answer with STAR, a real initiative of your own">
+  <div class="kicker">Model answer · a structure, not a story to borrow</div>
+  <ul>
+    <li>STAR, your own initiative, about two minutes</li>
+    <li>Actions sprint by sprint, each one shippable</li>
+    <li>Illustration: ADR + lint warnings → fix in batches → errors in CI</li>
+    <li>A measured result, and one thing you'd do differently</li>
+    <li>"I" for your decisions</li>
+  </ul>
+</section>
+
+<section id="q2" data-part="14" data-cue="How do you decide between paying down technical debt and shipping a feature?" data-voice="interviewer">
+  <div class="kicker">Question 2 of 5</div>
+  <p class="question">How do you decide between paying down tech debt and shipping a feature?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a2" data-part="14" data-cue="It's rarely either-or. I keep debt as a portfolio">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Rarely either-or: debt as a portfolio</li>
+    <li>Interest: incidents and slowed features</li>
+    <li>Attach it to the feature that touches it; a steady share for the rest</li>
+    <li>Interest moves with the roadmap (jobs in memory vs a second instance)</li>
+    <li>Explain it in business terms</li>
+  </ul>
+</section>
+
+<section id="q3" data-part="14" data-cue="You disagree with a senior backend engineer about an API shape. How do you resolve it?" data-voice="interviewer">
+  <div class="kicker">Question 3 of 5</div>
+  <p class="question">You disagree with a senior backend engineer about an API shape. How do you resolve it?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a3" data-part="14" data-cue="Understand their constraints first: other consumers, storage, cost">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Their constraints first</li>
+    <li>A PR on the OpenAPI document, both shapes, agreed criteria</li>
+    <li>Reversible vs irreversible</li>
+    <li>The BFF can adapt a platform shape</li>
+    <li>The owner decides; commit; an ADR records why</li>
+  </ul>
+</section>
+
+<section id="q4" data-part="14" data-cue="How do you raise the quality bar of a team without becoming the bottleneck?" data-voice="interviewer">
+  <div class="kicker">Question 4 of 5</div>
+  <p class="question">How do you raise the quality bar of a team without becoming the bottleneck?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a4" data-part="14" data-cue="Put the standard in tooling wherever it fits: formatting">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Tooling: format, lint, budgets, contract check, axe</li>
+    <li>Reference implementations and templates</li>
+    <li>Accessibility and tests in the definition of done</li>
+    <li>Pair, review, spot-check; spread review ownership</li>
+    <li>Quality holds when you're away</li>
+  </ul>
+</section>
+
+<section id="q5" data-part="14" data-cue="The catalog needs a new field that lives in a PHP service owned by another team. Walk through" data-voice="interviewer">
+  <div class="kicker">Question 5 of 5</div>
+  <p class="question">A new catalog field lives in another team's PHP service. Walk through every layer.</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a5" data-part="14" data-cue="Read their service first">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Route → controller → policy → API Resource</li>
+    <li>An additive, optional field; offer the PR; consumer contract test</li>
+    <li>openapi.yaml first; the schema enforces the order</li>
+    <li>BFF maps; web renders, absent case tested; behind a flag</li>
+    <li>Required once the platform guarantees it</li>
+  </ul>
+</section>
+
+<!-- ───────────── Recap ───────────── -->
+<template id="recap">
+  <h2>Five things to remember</h2>
+  <ol class="recap">
+    <li class="item">Write decisions down: context, costs, and when to revisit.</li>
+    <li class="item">Boundaries before refactors. Strangle, don't rewrite.</li>
+    <li class="item">Debt is a portfolio: pay the highest interest alongside features.</li>
+    <li class="item">The BFF adapts, combines and protects. Fields flow platform → contract → BFF → web.</li>
+    <li class="item">Scale yourself out. The story is STAR, sequenced, with a measured result.</li>
+  </ol>
+</template>
+<section id="recap-0" data-part="15" data-cue="Five things to remember" data-template="recap" data-show="0"></section>
+<section id="recap-1" data-part="15" data-cue="One: write decisions down" data-template="recap" data-show="1"></section>
+<section id="recap-2" data-part="15" data-cue="Two: boundaries before refactors" data-template="recap" data-show="2"></section>
+<section id="recap-3" data-part="15" data-cue="Three: technical debt is a portfolio" data-template="recap" data-show="3"></section>
+<section id="recap-4" data-part="15" data-cue="Four: the BFF adapts, combines and protects" data-template="recap" data-show="4"></section>
+<section id="recap-5" data-part="15" data-cue="Five: scale yourself out" data-template="recap" data-show="5"></section>
+
+<section id="series-complete" data-part="15" data-cue="The last step is yours">
+  <div class="kicker">Series complete</div>
+  <h1>The last step is yours</h1>
+  <div class="steps" style="margin-top:24px">
+    <div class="step on"><span class="num">1</span>Re-answer every drill out loud<span class="tag">study-guide.md</span></div>
+    <div class="step"><span class="num">2</span>No notes, under two minutes each<span class="tag">each drill</span></div>
+    <div class="step"><span class="num">3</span>Mark the ones you can't finish<span class="tag">re-read their files</span></div>
+    <div class="step"><span class="num">4</span>Work through the question bank<span class="tag">interview-questions.md</span></div>
+  </div>
+  <p class="lead" style="margin-top:40px">Good luck with the interview.</p>
+</section>
+
+<script src="../assets/slides.js"></script>
+</body>
+</html>

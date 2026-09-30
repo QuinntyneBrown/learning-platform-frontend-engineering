@@ -1,0 +1,808 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 05 Slides</title>
+<!--
+  Slides for the lesson 05 video. Each <section> is one slide. data-cue is a phrase from script.md:
+  tools/instructional-video/build.cs shows the slide from the moment the narration reaches that phrase.
+  Open this file in a browser and use the arrow keys to step through the deck.
+-->
+<link rel="stylesheet" href="../assets/slides.css">
+</head>
+<body data-lesson-number="05" data-lesson-title="Accessibility in a Single-Page App" data-parts="Introduction|The questions|A page load for free|Route focus|Live regions|Forms and focus|Skip link and landmarks|Native first|Testing|WCAG 2.2 and done|Traps|Interview drill|Recap">
+
+<!-- ───────────── Intro ───────────── -->
+<section id="title" data-part="0">
+  <div class="kicker">Coursewright frontend · Lesson 05</div>
+  <h1>Accessibility in a<br>Single-Page App</h1>
+  <p class="lead">Put back what the page load used to do, announce without shouting, and let native elements do the rest.</p>
+</section>
+
+<!-- ───────────── Questions ───────────── -->
+<section id="questions" data-part="1" data-cue="The questions this lesson answers">
+  <h2>The questions this lesson answers</h2>
+  <ul>
+    <li>"Nothing happens" after clicking a link: what's wrong?</li>
+    <li>How do you announce "12 courses found" without announcing every keystroke?</li>
+    <li>What's missing from a custom dropdown built from divs?</li>
+    <li>Which WCAG 2.2 criteria does a sticky header break?</li>
+    <li>How do you make accessibility part of a team's definition of done?</li>
+  </ul>
+</section>
+
+<section id="thesis" data-part="1" data-cue="Keep one sentence in your head while you listen">
+  <div class="kicker">The thesis</div>
+  <p class="quote">A single-page app takes over the browser's jobs, so it inherits the browser's <span class="accent">accessibility duties</span>.</p>
+  <p class="muted" style="margin-top:48px">Where the app replaces a page load, it moves focus and announces. Everywhere else, native elements do the work.</p>
+</section>
+
+<!-- ───────────── A page load for free ───────────── -->
+<template id="pageload">
+  <h2>What a page load gave you for free</h2>
+  <svg width="1640" height="560" viewBox="0 0 1640 560">
+    <defs><marker id="arrow-pl" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <g class="item">
+      <text x="0" y="30" fill="#8ea2c0" font-size="26">Multi-page site</text>
+      <rect x="0" y="50" width="300" height="150" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+      <text x="150" y="135" fill="#e8eef8" font-size="30" text-anchor="middle">Click a link</text>
+      <line x1="305" y1="125" x2="365" y2="125" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-pl)"/>
+      <rect x="375" y="50" width="340" height="150" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+      <text x="545" y="118" fill="#e8eef8" font-size="30" text-anchor="middle">New document</text>
+      <text x="545" y="158" fill="#8ea2c0" font-size="24" text-anchor="middle">loads</text>
+      <line x1="720" y1="125" x2="780" y2="125" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-pl)"/>
+      <rect x="790" y="50" width="270" height="150" rx="18" fill="#0f2233" stroke="#1f5f7f" stroke-width="2"/>
+      <text x="925" y="118" fill="#e8eef8" font-size="27" text-anchor="middle">Focus resets</text>
+      <text x="925" y="156" fill="#8ea2c0" font-size="23" text-anchor="middle">to the top</text>
+      <rect x="1080" y="50" width="270" height="150" rx="18" fill="#0f2233" stroke="#1f5f7f" stroke-width="2"/>
+      <text x="1215" y="118" fill="#e8eef8" font-size="27" text-anchor="middle">Title</text>
+      <text x="1215" y="156" fill="#8ea2c0" font-size="23" text-anchor="middle">announced</text>
+      <rect x="1370" y="50" width="270" height="150" rx="18" fill="#0f2233" stroke="#1f5f7f" stroke-width="2"/>
+      <text x="1505" y="118" fill="#e8eef8" font-size="27" text-anchor="middle">Reads from</text>
+      <text x="1505" y="156" fill="#8ea2c0" font-size="23" text-anchor="middle">the top</text>
+    </g>
+    <g class="item">
+      <text x="0" y="310" fill="#8ea2c0" font-size="26">Single-page app</text>
+      <rect x="0" y="330" width="300" height="150" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+      <text x="150" y="415" fill="#e8eef8" font-size="30" text-anchor="middle">Click a link</text>
+      <line x1="305" y1="405" x2="365" y2="405" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-pl)"/>
+      <rect x="375" y="330" width="340" height="150" rx="18" fill="#121b2f" stroke="#38bdf8" stroke-width="3"/>
+      <text x="545" y="398" fill="#e8eef8" font-size="30" text-anchor="middle">Router swaps</text>
+      <text x="545" y="438" fill="#8ea2c0" font-size="24" text-anchor="middle">the content of &lt;main&gt;</text>
+      <line x1="720" y1="405" x2="780" y2="405" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-pl)"/>
+      <rect x="790" y="330" width="270" height="150" rx="18" fill="#221b0d" stroke="#f5b544" stroke-width="2"/>
+      <text x="925" y="398" fill="#e8eef8" font-size="27" text-anchor="middle">Focus falls</text>
+      <text x="925" y="436" fill="#f5b544" font-size="23" text-anchor="middle">to &lt;body&gt;</text>
+      <rect x="1080" y="330" width="270" height="150" rx="18" fill="#221b0d" stroke="#f5b544" stroke-width="2"/>
+      <text x="1215" y="398" fill="#e8eef8" font-size="27" text-anchor="middle">Nothing</text>
+      <text x="1215" y="436" fill="#f5b544" font-size="23" text-anchor="middle">announced</text>
+      <rect x="1370" y="330" width="270" height="150" rx="18" fill="#221b0d" stroke="#f5b544" stroke-width="2"/>
+      <text x="1505" y="398" fill="#e8eef8" font-size="27" text-anchor="middle">"Nothing</text>
+      <text x="1505" y="436" fill="#f5b544" font-size="23" text-anchor="middle">happens"</text>
+    </g>
+  </svg>
+</template>
+<section id="pageload-1" data-part="2" data-cue="Start with what a traditional website gets without trying" data-template="pageload" data-show="1"></section>
+<section id="pageload-2" data-part="2" data-cue="A single-page app does none of that by default" data-template="pageload" data-show="2"></section>
+
+<section id="put-back" data-part="2" data-cue="So there are three things to put back">
+  <h2>Three things to put back</h2>
+  <div class="cols3">
+    <div class="card"><h3>A title</h3><p>"Catalog · Coursewright". The title strategy, lesson 04.</p></div>
+    <div class="card modern"><h3>Focus</h3><p>On the new page's h1, so the next Tab starts there.</p></div>
+    <div class="card modern"><h3>An announcement</h3><p>"Catalog page loaded", through a polite live region.</p></div>
+  </div>
+</section>
+
+<!-- ───────────── Route focus ───────────── -->
+<section id="route-focus" data-part="3" data-cue="Open apps/web/src/app/shell/route-focus.ts">
+  <h2>One function, called once by the shell</h2>
+  <div class="file">apps/web/src/app/shell/route-focus.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2,3">/**
+ * A single-page app swaps content without a page load, so a screen reader stays wherever it
+ * was and says nothing. After each route change, move focus to the new page's h1 (or &lt;main&gt;)
+ * and announce the page. Call from an injection context.
+ */
+export function focusPageOnNavigation(): void {</pre>
+  <div class="file">apps/web/src/app/shell/shell.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2">constructor() {
+  focusPageOnNavigation();
+}</pre>
+</section>
+
+<section id="route-pipeline" data-part="3" data-cue="It listens to the router's events">
+  <h2>From navigation to focus</h2>
+  <svg width="1640" height="470" viewBox="0 0 1640 470">
+    <defs><marker id="arrow-rf" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="0" y="20" width="290" height="140" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="145" y="82" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">NavigationEnd</text>
+    <text x="145" y="120" fill="#8ea2c0" font-size="22" text-anchor="middle">router events</text>
+    <line x1="294" y1="90" x2="333" y2="90" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-rf)"/>
+    <rect x="337" y="20" width="290" height="140" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="482" y="82" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">Path only</text>
+    <text x="482" y="120" fill="#8ea2c0" font-size="22" text-anchor="middle">drop ?query and #fragment</text>
+    <line x1="631" y1="90" x2="670" y2="90" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-rf)"/>
+    <rect x="674" y="20" width="290" height="140" rx="18" fill="#121b2f" stroke="#38bdf8" stroke-width="3"/>
+    <text x="819" y="82" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">Path changed?</text>
+    <text x="819" y="120" fill="#8ea2c0" font-size="22" text-anchor="middle">distinctUntilChanged</text>
+    <line x1="968" y1="90" x2="1007" y2="90" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-rf)"/>
+    <rect x="1011" y="20" width="290" height="140" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="1156" y="82" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">Not the first load</text>
+    <text x="1156" y="120" fill="#8ea2c0" font-size="22" text-anchor="middle">skip(1)</text>
+    <line x1="1305" y1="90" x2="1344" y2="90" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-rf)"/>
+    <rect x="1348" y="20" width="290" height="140" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="1493" y="82" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">Next render</text>
+    <text x="1493" y="120" fill="#8ea2c0" font-size="22" text-anchor="middle">afterNextRender</text>
+    <line x1="1440" y1="164" x2="1000" y2="290" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-rf)"/>
+    <line x1="1520" y1="164" x2="1470" y2="290" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-rf)"/>
+    <rect x="680" y="300" width="560" height="140" rx="18" fill="#0f2233" stroke="#1f5f7f" stroke-width="3"/>
+    <text x="960" y="362" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">Focus main h1 (or &lt;main&gt;)</text>
+    <text x="960" y="402" fill="#8ea2c0" font-size="22" text-anchor="middle">tabindex="-1", then focus()</text>
+    <rect x="1280" y="300" width="360" height="140" rx="18" fill="#0f2233" stroke="#1f5f7f" stroke-width="3"/>
+    <text x="1460" y="362" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">Announce</text>
+    <text x="1460" y="402" fill="#8ea2c0" font-size="22" text-anchor="middle">"Catalog page loaded"</text>
+    <line x1="819" y1="164" x2="819" y2="210" stroke="#f5b544" stroke-width="3" stroke-dasharray="8 6"/>
+    <text x="0" y="250" fill="#f5b544" font-size="26">Typing in the search box changes only ?q=, so it stops here.</text>
+    <text x="0" y="290" fill="#8ea2c0" font-size="24">Focus stays in the search box.</text>
+  </svg>
+</section>
+
+<section id="route-filters" data-part="3" data-cue="The comment explains why: the catalog writes the search text into the URL">
+  <h2>Only a new path counts</h2>
+  <div class="file">apps/web/src/app/shell/route-focus.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="4,5,6,7,8,9">router.events
+  .pipe(
+    filter((event) =&gt; event instanceof NavigationEnd),
+    // Only a new path counts: query-only changes (the catalog's ?q=) must not steal focus
+    // from the search box while the user types.
+    map((event) =&gt; event.urlAfterRedirects.split(/[?#]/)[0]),
+    distinctUntilChanged(),
+    // On the initial load the screen reader already reads the new document from the top.
+    skip(1),
+    takeUntilDestroyed(),
+  )</pre>
+</section>
+
+<section id="route-focus-render" data-part="3" data-cue="For every real page change, it waits for Angular's next render">
+  <h2>After the render: focus, then announce</h2>
+  <div class="file">apps/web/src/app/shell/route-focus.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="4,6,7,10">afterNextRender(
+  () =&gt; {
+    const target =
+      document.querySelector&lt;HTMLElement&gt;('main h1') ?? document.getElementById('main');
+    if (target) {
+      target.setAttribute('tabindex', '-1');
+      target.focus();
+    }
+    const title = titles.buildTitle(router.routerState.snapshot);
+    if (title) announcer.announce(`${title} page loaded`);
+  },
+  { injector },
+);</pre>
+  <p class="small muted">tabindex="-1": focusable from script, but not added to the Tab order.</p>
+</section>
+
+<section id="focus-ring" data-part="3" data-cue="Two details make this work">
+  <h2>A focused heading isn't a control</h2>
+  <div class="file">apps/web/src/app/design-system/tokens.css</div>
+  <pre class="code tight" data-lang="css" data-mark="7,8,9,10">/* Keyboard users get a visible ring; mouse clicks don't (that's what :focus-visible decides). */
+:focus-visible {
+  outline: var(--cw-focus-ring);
+  outline-offset: var(--cw-focus-offset);
+}
+
+/* Headings and &lt;main&gt; receive focus from script after navigation; they aren't controls. */
+[tabindex='-1']:focus:not(:focus-visible) {
+  outline: none;
+}</pre>
+</section>
+
+<section id="one-h1" data-part="3" data-cue="And the page must not replace its heading while focus is on it">
+  <h2>One h1 whose text changes</h2>
+  <div class="file">apps/web/src/app/features/course/course-page.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,2">// One h1 whose text changes, rather than one h1 per state: route focus lands on it while
+// the course is still loading, and replacing the element would drop that focus.
+protected readonly heading = computed(() =&gt; {
+  if (this.course.hasValue()) return this.course.value().title;
+  if (this.notFound()) return 'Course not found';
+  if (this.course.error()) return 'Course unavailable';
+  return 'Loading course…';
+});</pre>
+  <div class="file">apps/web/e2e/learner-journey.spec.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="3">await courseLink.click();
+const heading = page.getByRole('heading', { level: 1, name: 'Angular Signals in Practice' });
+await expect(heading).toBeFocused();</pre>
+</section>
+
+<!-- ───────────── Live regions ───────────── -->
+<section id="live-region" data-part="4" data-cue="A live region is the other way to tell a screen reader something changed">
+  <h2>Two ways to tell a screen reader</h2>
+  <div class="cols">
+    <div class="card"><h3>Move focus</h3><p>For a new page, or when the focused element disappears. The reader reads what gets focus.</p></div>
+    <div class="card modern"><h3>A live region</h3><p>For a result or a status. The reader reads the new text; focus stays where it is.</p></div>
+  </div>
+  <div class="cols" style="margin-top:40px">
+    <p class="small"><span class="accent">polite</span>: waits until the reader finishes speaking</p>
+    <p class="small"><span class="amber">assertive</span>: interrupts. Keep it for errors.</p>
+  </div>
+</section>
+
+<section id="announcer" data-part="4" data-cue="Open design-system/live-announcer.ts">
+  <h2>One polite region for the whole app</h2>
+  <div class="file">apps/web/src/app/design-system/live-announcer.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="9,10,11">/**
+ * One app-wide polite live region, for changes a screen reader user would otherwise miss:
+ * a route change in a single-page app, or a button that has been replaced by its result.
+ */
+export class LiveAnnouncer {
+  // …
+  private createRegion(): HTMLElement {
+    const region = this.document.createElement('div');
+    region.className = 'cw-visually-hidden';
+    region.setAttribute('aria-live', 'polite');
+    region.setAttribute('aria-atomic', 'true');
+    this.document.body.appendChild(region);
+    return region;
+  }</pre>
+</section>
+
+<section id="announce" data-part="4" data-cue="The announce method has a quirk worth explaining">
+  <h2>Clear, then set on a later task</h2>
+  <div class="file">apps/web/src/app/design-system/live-announcer.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="6,8">announce(message: string): void {
+  const region = (this.region ??= this.createRegion());
+  // Clear, then set on a later task: screen readers announce changes to a region, so this
+  // also re-announces a message identical to the previous one. The region must already be in
+  // the DOM when its text changes, which is why the first call creates it before setting text.
+  region.textContent = '';
+  clearTimeout(this.pending);
+  this.pending = setTimeout(() =&gt; (region.textContent = message), 100);
+}</pre>
+  <div class="cols">
+    <p class="small"><span class="accent">shell/route-focus.ts</span>: "Catalog page loaded"</p>
+    <p class="small"><span class="accent">features/course/enrollment-controller.ts</span>: "You're enrolled"</p>
+  </div>
+</section>
+
+<section id="catalog-status" data-part="4" data-cue="The catalog uses the other kind of live region">
+  <h2>A status region for the result count</h2>
+  <div class="file">apps/web/src/app/features/catalog/catalog-page.html · excerpt</div>
+  <pre class="code tight" data-lang="html" data-mark="1,2,11,12">&lt;div class="search" role="search"&gt;
+  &lt;label for="course-search"&gt;Search courses&lt;/label&gt;
+  &lt;input
+    #searchBox
+    id="course-search"
+    type="search"
+    …
+  /&gt;
+&lt;/div&gt;
+
+&lt;!-- role="status" is a polite live region: result counts are read out without moving focus. --&gt;
+&lt;p class="status" role="status"&gt;{{ statusText() }}&lt;/p&gt;</pre>
+</section>
+
+<section id="status-text" data-part="4" data-cue="Its text is a computed signal: empty">
+  <h2>What the region says</h2>
+  <div class="file">apps/web/src/app/features/catalog/catalog-page.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="8,12,13">protected readonly statusText = computed(() =&gt; {
+  const { status, items, query, nextCursor, error } = this.store;
+  const count = items().length;
+  switch (status()) {
+    case 'idle':
+      return '';
+    case 'loading':
+      return 'Searching…';
+    case 'error':
+      return error() ?? '';
+    case 'loaded':
+      if (count === 0) return query() ? `No courses match "${query()}"` : 'No courses yet';
+      return `${count}${nextCursor() ? '+' : ''} ${count === 1 ? 'course' : 'courses'} found`;
+    // …</pre>
+</section>
+
+<section id="not-every-keystroke" data-part="4" data-cue="That answers the second question">
+  <h2>Seven keystrokes, one request, one result</h2>
+  <svg width="1640" height="520" viewBox="0 0 1640 520">
+    <defs><marker id="arrow-db" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <line x1="280" y1="490" x2="1630" y2="490" stroke="#22304d" stroke-width="3" marker-end="url(#arrow-db)"/>
+    <text x="1630" y="470" fill="#8ea2c0" font-size="22" text-anchor="end">time</text>
+    <text x="0" y="70" fill="#8ea2c0" font-size="26">Keystrokes</text>
+    <rect x="290" y="35" width="56" height="56" rx="10" fill="#121b2f" stroke="#22304d" stroke-width="2"/><text x="318" y="73" fill="#e8eef8" font-size="28" text-anchor="middle">s</text>
+    <rect x="360" y="35" width="56" height="56" rx="10" fill="#121b2f" stroke="#22304d" stroke-width="2"/><text x="388" y="73" fill="#e8eef8" font-size="28" text-anchor="middle">i</text>
+    <rect x="430" y="35" width="56" height="56" rx="10" fill="#121b2f" stroke="#22304d" stroke-width="2"/><text x="458" y="73" fill="#e8eef8" font-size="28" text-anchor="middle">g</text>
+    <rect x="500" y="35" width="56" height="56" rx="10" fill="#121b2f" stroke="#22304d" stroke-width="2"/><text x="528" y="73" fill="#e8eef8" font-size="28" text-anchor="middle">n</text>
+    <rect x="570" y="35" width="56" height="56" rx="10" fill="#121b2f" stroke="#22304d" stroke-width="2"/><text x="598" y="73" fill="#e8eef8" font-size="28" text-anchor="middle">a</text>
+    <rect x="640" y="35" width="56" height="56" rx="10" fill="#121b2f" stroke="#22304d" stroke-width="2"/><text x="668" y="73" fill="#e8eef8" font-size="28" text-anchor="middle">l</text>
+    <rect x="710" y="35" width="56" height="56" rx="10" fill="#121b2f" stroke="#22304d" stroke-width="2"/><text x="738" y="73" fill="#e8eef8" font-size="28" text-anchor="middle">s</text>
+    <text x="0" y="190" fill="#8ea2c0" font-size="26">debounceTime(250)</text>
+    <line x1="738" y1="130" x2="960" y2="130" stroke="#f5b544" stroke-width="3" stroke-dasharray="8 6"/>
+    <text x="849" y="118" fill="#f5b544" font-size="22" text-anchor="middle">250 ms pause</text>
+    <circle cx="960" cy="180" r="14" fill="#38bdf8"/>
+    <text x="990" y="190" fill="#e8eef8" font-size="26">"signals"</text>
+    <text x="0" y="300" fill="#8ea2c0" font-size="26">Request</text>
+    <rect x="960" y="270" width="260" height="46" rx="10" fill="#0f2233" stroke="#1f5f7f" stroke-width="2"/>
+    <text x="1090" y="302" fill="#e8eef8" font-size="22" text-anchor="middle">GET /api/courses</text>
+    <text x="0" y="410" fill="#8ea2c0" font-size="26">role="status"</text>
+    <line x1="960" y1="200" x2="960" y2="370" stroke="#8ea2c0" stroke-width="2" stroke-dasharray="4 6"/>
+    <line x1="1220" y1="320" x2="1220" y2="370" stroke="#8ea2c0" stroke-width="2" stroke-dasharray="4 6"/>
+    <rect x="890" y="375" width="220" height="56" rx="12" fill="#121b2f" stroke="#38bdf8" stroke-width="2"/>
+    <text x="1000" y="412" fill="#e8eef8" font-size="24" text-anchor="middle">Searching…</text>
+    <rect x="1150" y="375" width="260" height="56" rx="12" fill="#121b2f" stroke="#38bdf8" stroke-width="2"/>
+    <text x="1280" y="412" fill="#e8eef8" font-size="24" text-anchor="middle">1 course found</text>
+  </svg>
+  <p class="small muted">The region is always in the DOM, and changes only when the results settle. The pipeline is lesson 03.</p>
+</section>
+
+<section id="progress" data-part="4" data-cue="The reports page shows the same restraint with progress">
+  <h2>A native progress bar, and a quiet status</h2>
+  <div class="file">apps/web/src/app/design-system/progress/progress.ts · excerpt</div>
+  <pre class="code tight" data-lang="html" data-mark="1,3">&lt;label class="label" [for]="id"&gt;{{ label() }}&lt;/label&gt;
+&lt;div class="track"&gt;
+  &lt;progress [id]="id" max="100" [value]="value()"&gt;&lt;/progress&gt;
+  &lt;span class="percent" aria-hidden="true"&gt;{{ value() }}%&lt;/span&gt;
+&lt;/div&gt;</pre>
+  <div class="file">apps/web/src/app/features/reports/reports-page.html · excerpt</div>
+  <pre class="code tight" data-lang="html" data-mark="5,6">@if (current) {
+  &lt;cw-progress class="progress" label="Export progress" [value]="current.progress" /&gt;
+}
+
+&lt;!-- Always rendered: a live region must exist before its text changes to be announced. --&gt;
+&lt;p class="status" role="status"&gt;{{ statusText() }}&lt;/p&gt;</pre>
+</section>
+
+<section id="job-status" data-part="4" data-cue="The page's status region changes only when the job's state changes">
+  <h2>Announce state changes, not ticks</h2>
+  <div class="file">apps/web/src/app/features/reports/reports-page.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="6,8,10,12">protected readonly statusText = computed(() =&gt; {
+  const job = this.job();
+  if (!job) return '';
+  switch (job.status) {
+    case 'queued':
+      return 'Queued';
+    case 'running':
+      return `Running — attempt ${job.attempt} of ${job.maxAttempts}`;
+    case 'completed':
+      return 'Completed';
+    case 'failed':
+      return `Failed: ${job.error ?? 'unknown error'}`;
+  }
+});</pre>
+  <p class="small muted">The percentage isn't in it: nobody hears "40%, 60%, 80%".</p>
+</section>
+
+<!-- ───────────── Forms and focus ───────────── -->
+<section id="error-summary" data-part="5" data-cue="Lesson one showed the text field's own wiring">
+  <h2>One alert for the whole form</h2>
+  <div class="file">apps/web/src/app/features/login/login-page.html · excerpt</div>
+  <pre class="code tight" data-lang="html" data-mark="3,4,5">&lt;h1&gt;Sign in&lt;/h1&gt;
+
+&lt;!-- One alert for the whole form: it is inserted with its text, so screen readers announce it once. --&gt;
+@if (errorMessage(); as message) {
+  &lt;p class="error-summary" role="alert"&gt;{{ message }}&lt;/p&gt;
+}
+
+&lt;form class="form" [formGroup]="form" (ngSubmit)="submit()" novalidate&gt;
+  &lt;cw-text-field
+    formControlName="username"
+    label="Username"
+    autocomplete="username"
+    [error]="fieldError('username', 'Enter your username.')"
+  /&gt;</pre>
+  <p class="small muted">Each field's error is described by aria-describedby, with no alert role (lesson 01).</p>
+</section>
+
+<section id="login-spec" data-part="5" data-cue="The spec file proves both">
+  <h2>The spec counts the alerts</h2>
+  <div class="file">apps/web/src/app/features/login/login-page.spec.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="4,12">it('shows one alert when the credentials are wrong', async () =&gt; {
+  // …
+  const alerts = element.querySelectorAll('[role="alert"]');
+  expect(alerts).toHaveLength(1);
+  expect(alerts[0].textContent?.trim()).toBe('Username or password is incorrect.');
+});
+
+it('flags empty fields without calling the API', async () =&gt; {
+  // …
+  http.expectNone('/api/auth/login');
+  // …
+  expect(element.querySelectorAll('input[aria-invalid="true"]')).toHaveLength(2);
+});</pre>
+</section>
+
+<section id="busy" data-part="5" data-cue="Buttons that are working show busy, not disabled">
+  <h2>Busy, not disabled</h2>
+  <div class="file">apps/web/src/app/features/login/login-page.html · excerpt</div>
+  <pre class="code" data-lang="html" data-mark="1">&lt;button cwButton type="submit" [busy]="pending()"&gt;Sign in&lt;/button&gt;</pre>
+  <div class="cols">
+    <div class="card legacy"><h3 class="amber">disabled</h3><p>Drops focus. Skipped by Tab. Hides why it's unavailable.</p></div>
+    <div class="card modern"><h3>aria-busy</h3><p>Focus stays. A spinner shows. The logic absorbs repeats.</p></div>
+  </div>
+</section>
+
+<section id="enrolled" data-part="5" data-cue="Now the subtle one">
+  <h2>The focused button disappears</h2>
+  <div class="file">apps/web/src/app/features/course/course-page.html · excerpt</div>
+  <pre class="code tight" data-lang="html" data-mark="3,9">&lt;div class="enroll"&gt;
+  @if (enrolled()) {
+    &lt;p #enrolledStatus class="enrolled" tabindex="-1"&gt;You're enrolled&lt;/p&gt;
+  } @else {
+    &lt;!-- Busy, never disabled: a double-click must reach exhaustMap, which absorbs it. --&gt;
+    &lt;button
+      cwButton
+      type="button"
+      [busy]="enrollment.status() === 'pending'"
+      (click)="enrollment.enroll(details.id)"
+    &gt;
+      Enroll
+    &lt;/button&gt;</pre>
+  <p class="small amber">Remove the focused element, and focus falls back to &lt;body&gt;.</p>
+</section>
+
+<section id="after-render" data-part="5" data-cue="course-page.ts fixes that with an afterRenderEffect">
+  <h2>Decide where focus goes next</h2>
+  <div class="file">apps/web/src/app/features/course/course-page.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="5,6">private readonly enrolledStatus = viewChild&lt;ElementRef&lt;HTMLElement&gt;&gt;('enrolledStatus');
+// …
+  // The Enroll button had focus and has just been removed; without this, focus falls back
+  // to &lt;body&gt; and a keyboard user starts again from the top of the page.
+  afterRenderEffect(() =&gt; {
+    if (this.enrollment.status() === 'enrolled') this.enrolledStatus()?.nativeElement.focus();
+  });</pre>
+  <p class="quote" style="font-size:44px;margin-top:20px">Remove the element that has focus? <span class="accent">Decide where focus goes.</span></p>
+</section>
+
+<!-- ───────────── Skip link and landmarks ───────────── -->
+<section id="skip-link" data-part="6" data-cue="Open shell/shell.html">
+  <h2>The skip link comes first</h2>
+  <div class="file">apps/web/src/app/shell/shell.html · excerpt</div>
+  <pre class="code tight" data-lang="html" data-mark="1,3">&lt;a class="skip-link" href="#main" (click)="skipToMain($event)"&gt;Skip to main content&lt;/a&gt;
+…
+&lt;main #main id="main" class="main" tabindex="-1"&gt;
+  &lt;router-outlet /&gt;
+&lt;/main&gt;</pre>
+  <div class="file">apps/web/src/app/shell/shell.css · condensed</div>
+  <pre class="code tight" data-lang="css" data-mark="1,4,7">/* Off-screen until focused: then it's the first thing a keyboard user sees. */
+.skip-link {
+  /* … */
+  transform: translateY(-200%);
+}
+.skip-link:focus {
+  transform: none;
+}</pre>
+</section>
+
+<section id="skip-handler" data-part="6" data-cue="Its click handler is the interesting part">
+  <h2>Why the link moves focus itself</h2>
+  <div class="file">apps/web/src/app/shell/shell.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,2,4,5">// A plain href="#main" would resolve against &lt;base href="/"&gt; and navigate to "/#main",
+// so the link moves focus itself. It keeps the href so it's still a real link.
+protected skipToMain(event: Event): void {
+  event.preventDefault();
+  this.main().nativeElement.focus();
+}</pre>
+  <div class="cols">
+    <div class="card legacy"><h3 class="amber">href="#main" alone</h3><p>From /catalog, navigates to /#main: a route change.</p></div>
+    <div class="card modern"><h3>href + handler</h3><p>Still a real link. Focus lands on main, and the route stays.</p></div>
+  </div>
+</section>
+
+<section id="landmarks" data-part="6" data-cue="The header holds a nav element labelled">
+  <h2>Landmarks and the current page</h2>
+  <div class="file">apps/web/src/app/shell/shell.html · excerpt</div>
+  <pre class="code tight" data-lang="html" data-mark="1,4">&lt;nav class="nav" aria-label="Main"&gt;
+  &lt;ul&gt;
+    &lt;li&gt;
+      &lt;a routerLink="/catalog" routerLinkActive="active" ariaCurrentWhenActive="page"&gt;
+        Catalog
+      &lt;/a&gt;
+    &lt;/li&gt;</pre>
+  <div class="file">apps/web/src/app/shell/shell.css · excerpt</div>
+  <pre class="code tight" data-lang="css" data-mark="2">.nav a.active {
+  text-decoration-thickness: 3px;
+}</pre>
+  <p class="small muted">aria-current="page" is heard as "current page". The visual cue isn't a color change.</p>
+</section>
+
+<section id="shell-spec" data-part="6" data-cue="shell/shell.spec.ts tests the skip link">
+  <h2>A unit test for the skip link</h2>
+  <div class="file">apps/web/src/app/shell/shell.spec.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="5,7,9,12">const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
+// …
+it('starts with a skip link that moves focus to &lt;main&gt;', async () =&gt; {
+  // …
+  const skipLink = element.querySelector&lt;HTMLAnchorElement&gt;(FOCUSABLE)!;
+  expect(skipLink.textContent?.trim()).toBe('Skip to main content');
+  expect(skipLink.getAttribute('href')).toBe('#main');
+
+  skipLink.click();
+  const main = element.querySelector('main')!;
+  expect(main.id).toBe('main');
+  expect(document.activeElement).toBe(main);</pre>
+</section>
+
+<!-- ───────────── Native first ───────────── -->
+<section id="native" data-part="7" data-cue="Notice how little ARIA there is">
+  <h2>Native elements first</h2>
+  <div class="cols3">
+    <div class="card modern"><h3>button[cwButton]</h3><p>A native button: focus, Enter and Space, role, name.</p></div>
+    <div class="card modern"><h3>&lt;progress&gt;</h3><p>Inside cw-progress: the progress bar role and its value.</p></div>
+    <div class="card modern"><h3>&lt;select&gt;</h3><p>On the reports page, with a label and a hint.</p></div>
+  </div>
+  <p class="quote" style="margin-top:56px;font-size:48px">No ARIA is better than <span class="amber">bad ARIA</span>.</p>
+</section>
+
+<section id="dropdown" data-part="7" data-cue="That's the lens for the third question">
+  <h2>Review: a dropdown built from divs</h2>
+  <p class="small muted">First comment: why isn't this a native &lt;select&gt;? If there's a real reason:</p>
+  <ul class="checks small">
+    <li>A name, from a label</li>
+    <li>Roles: combobox (or button), listbox, option</li>
+    <li>State: aria-expanded, and the selected option</li>
+    <li>Keys: Tab, arrows, Enter, Escape, Home, End, type to jump</li>
+    <li>Focus returns to the control when the list closes</li>
+    <li>A visible focus ring, and a target big enough to tap</li>
+  </ul>
+</section>
+
+<section id="dropdown-lint" data-part="7" data-cue="Coursewright's lint would object first">
+  <h2>Lint objects first</h2>
+  <div class="file">Sketch · not in this repo · linted with the web app's config</div>
+  <pre class="code" data-lang="html">&lt;div class="select" (click)="toggle()"&gt;{{ selected() }}&lt;/div&gt;</pre>
+  <div class="card legacy">
+    <p class="amber small">error  click must be accompanied by either keyup, keydown or keypress event for accessibility  @angular-eslint/template/click-events-have-key-events</p>
+    <p class="amber small">error  Elements with interaction handlers must be focusable  @angular-eslint/template/interactive-supports-focus</p>
+  </div>
+  <p class="small muted" style="margin-top:28px">Then: the published ARIA combobox or listbox pattern, or a tested headless library such as the Angular CDK's listbox.</p>
+</section>
+
+<!-- ───────────── Testing ───────────── -->
+<section id="three-levels" data-part="8" data-cue="Coursewright tests accessibility at three levels">
+  <h2>Three levels of testing</h2>
+  <div class="cols3">
+    <div class="card"><h3>Lint</h3><p>Every template, on every commit. Catches missing labels and click-only divs.</p></div>
+    <div class="card"><h3>Playwright + axe</h3><p>Real pages, WCAG A and AA rules, and a keyboard path.</p></div>
+    <div class="card modern"><h3>People</h3><p>A keyboard walkthrough, and a screen-reader pass.</p></div>
+  </div>
+</section>
+
+<section id="lint" data-part="8" data-cue="Lint runs on every template">
+  <h2>Template accessibility rules</h2>
+  <div class="file">apps/web/eslint.config.js · excerpt</div>
+  <pre class="code" data-lang="js" data-mark="3">{
+  files: ['**/*.html'],
+  extends: [angular.configs.templateRecommended, angular.configs.templateAccessibility],
+  rules: {},
+},</pre>
+  <div class="card">
+    <p class="small">alt-text · click-events-have-key-events · elements-content · interactive-supports-focus · label-has-associated-control · mouse-events-have-key-events · no-autofocus · no-distracting-elements · role-has-required-aria · table-scope · valid-aria</p>
+  </div>
+</section>
+
+<section id="axe" data-part="8" data-cue="End-to-end tests run axe">
+  <h2>axe on real pages</h2>
+  <div class="file">apps/web/e2e/support.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="4,7">/** Fails on serious or critical WCAG 2.2 AA violations; minor ones don't block. */
+export async function expectNoSeriousA11yViolations(page: Page): Promise&lt;void&gt; {
+  const results = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+    .analyze();
+  const blocking = results.violations
+    .filter((v) =&gt; v.impact === 'serious' || v.impact === 'critical')
+    .map((v) =&gt; `${v.id}: ${v.help} (${v.nodes.map((n) =&gt; n.target.join(' ')).join(', ')})`);
+  expect(blocking).toEqual([]);
+}</pre>
+  <p class="small muted">Called on the sign-in, catalog, course and reports pages in e2e/accessibility.spec.ts.</p>
+</section>
+
+<section id="keyboard" data-part="8" data-cue="It also walks a keyboard path">
+  <h2>A keyboard path, in Playwright</h2>
+  <div class="file">apps/web/e2e/accessibility.spec.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="7,9,10,11">test('keyboard users can skip straight to the main content', async ({ page }) =&gt; {
+  await signIn(page, 'learner.acme');
+  // Route focus moved to the h1 after sign-in. A fresh load leaves focus at the top of the
+  // document, where a keyboard user starts.
+  await page.reload();
+  await expect(page.getByRole('heading', { level: 1, name: 'Catalog' })).toBeVisible();
+  await page.keyboard.press('Tab');
+  const skipLink = page.getByRole('link', { name: 'Skip to main content' });
+  await expect(skipLink).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('main')).toBeFocused();
+});</pre>
+</section>
+
+<section id="limits" data-part="8" data-cue="Then be honest about the limits">
+  <h2>What automation can't tell you</h2>
+  <div class="cols">
+    <div class="card">
+      <h3>Automated checks</h3>
+      <ul>
+        <li>Missing names and labels</li>
+        <li>Invalid ARIA, bad contrast</li>
+        <li>Perhaps a third of real issues</li>
+      </ul>
+    </div>
+    <div class="card modern">
+      <h3>People</h3>
+      <ul>
+        <li>Did focus go somewhere sensible?</li>
+        <li>Does the announcement make sense?</li>
+        <li>NVDA · VoiceOver · TalkBack</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── WCAG 2.2 and done ───────────── -->
+<section id="wcag22" data-part="9" data-cue="As of September 2026, WCAG 2.2 is the current W3C Recommendation">
+  <h2>WCAG 2.2 criteria SPAs trip over</h2>
+  <table>
+    <tr><th>Criterion (level)</th><th>What it asks</th><th>In Coursewright</th></tr>
+    <tr><td>2.4.11 Focus Not Obscured (AA)</td><td>The focused element isn't completely hidden by author content</td><td>The header doesn't stick</td></tr>
+    <tr><td>2.5.8 Target Size (AA)</td><td>Pointer targets at least 24 × 24 CSS px, or spaced</td><td>Buttons and inputs: min-height 2.75rem (44 px)</td></tr>
+    <tr><td>3.3.8 Accessible Auth. (AA)</td><td>No memory test or puzzle to sign in</td><td>autocomplete="username", "current-password"</td></tr>
+  </table>
+  <p class="small muted" style="margin-top:28px">As of September 2026, WCAG 2.2 is the current W3C Recommendation. Check the level your market requires.</p>
+</section>
+
+<section id="sticky" data-part="9" data-cue="That sets up the fourth question">
+  <h2>What a sticky header breaks</h2>
+  <svg width="1640" height="400" viewBox="0 0 1640 400">
+    <rect x="0" y="0" width="760" height="330" rx="16" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <rect x="160" y="100" width="440" height="70" rx="10" fill="#0a1020" stroke="#f5b544" stroke-width="4"/>
+    <text x="380" y="146" fill="#8ea2c0" font-size="24" text-anchor="middle">focused link, scrolled up</text>
+    <rect x="0" y="0" width="760" height="120" rx="16" fill="#1c2742" stroke="#22304d" stroke-width="2"/>
+    <text x="380" y="70" fill="#e8eef8" font-size="30" text-anchor="middle">Sticky header</text>
+    <text x="380" y="370" fill="#f5b544" font-size="26" text-anchor="middle">Focus Not Obscured: hidden under the header</text>
+    <rect x="880" y="0" width="760" height="330" rx="16" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <rect x="880" y="0" width="760" height="120" rx="16" fill="#1c2742" stroke="#22304d" stroke-width="2"/>
+    <text x="1260" y="70" fill="#e8eef8" font-size="30" text-anchor="middle">Sticky header</text>
+    <rect x="1040" y="160" width="440" height="70" rx="10" fill="#0a1020" stroke="#38bdf8" stroke-width="4"/>
+    <text x="1260" y="206" fill="#e8eef8" font-size="24" text-anchor="middle">focused link, fully visible</text>
+    <text x="1260" y="370" fill="#38bdf8" font-size="26" text-anchor="middle">scroll-padding-top: the header's height</text>
+  </svg>
+  <p class="small muted">Also: <span class="accent">Reflow</span>, at 400% zoom the header fills the screen · <span class="accent">Target Size</span>, small icon buttons.</p>
+</section>
+
+<section id="done" data-part="9" data-cue="The fifth question is about making this routine">
+  <h2>Accessibility in the definition of done</h2>
+  <div class="steps">
+    <div class="step on"><span class="num">1</span>Design annotates headings, focus order, names</div>
+    <div class="step on"><span class="num">2</span>PR template: a keyboard pass</div>
+    <div class="step on"><span class="num">3</span>Lint and axe block the build (done here)</div>
+    <div class="step on"><span class="num">4</span>Screen-reader pass on key journeys</div>
+    <div class="step on"><span class="num">5</span>Bugs triaged by severity</div>
+    <div class="step on"><span class="num">6</span>A champion per team, and training</div>
+  </div>
+  <p class="small muted" style="margin-top:40px">Production would add: Storybook accessibility tests per component · forced-colors styles · a VPAT for enterprise buyers.</p>
+</section>
+
+<!-- ───────────── Traps ───────────── -->
+<section id="traps" data-part="10" data-cue="Moving focus on every navigation, including query changes">
+  <h2>Traps</h2>
+  <ul class="small">
+    <li>Moving focus on query-only changes: the search box loses focus</li>
+    <li>Creating a live region at the moment you set its text</li>
+    <li>Announcing every keystroke, or every progress tick</li>
+    <li>role="alert" on every field error</li>
+    <li>Disabling a button while it works</li>
+    <li>A div with a click handler as a button or select</li>
+    <li>Removing focus outlines globally: use :focus-visible</li>
+    <li>Treating a clean axe run as proof</li>
+  </ul>
+</section>
+
+<!-- ───────────── Interview drill ───────────── -->
+<section id="drill" data-part="11" data-cue="Let's practise">
+  <div class="kicker">Interview drill</div>
+  <h1>Five questions</h1>
+  <p class="lead">After each question, pause and answer out loud. Then compare with the model answer.</p>
+</section>
+
+<section id="q1" data-part="11" data-cue="A screen-reader user says nothing happens after clicking a link in your single-page app. What's wrong, and how do you fix it?" data-voice="interviewer">
+  <div class="kicker">Question 1 of 5</div>
+  <p class="question">A screen-reader user says nothing happens after clicking a link. What's wrong, and how do you fix it?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a1" data-part="11" data-cue="The router swapped the content without a page load">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>No page load: focus stayed on a vanished link; nothing announced</li>
+    <li>On a path change, after render: focus the h1 (tabindex -1)</li>
+    <li>Announce the page title in a polite live region</li>
+    <li>Skip query-only changes and the initial load</li>
+    <li>Coursewright: route-focus.ts, and a Playwright assertion</li>
+  </ul>
+</section>
+
+<section id="q2" data-part="11" data-cue="How do you announce async results, like twelve courses found, without announcing every keystroke?" data-voice="interviewer">
+  <div class="kicker">Question 2 of 5</div>
+  <p class="question">How do you announce "12 courses found" without announcing every keystroke?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a2" data-part="11" data-cue="Put the count in a status region">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>role="status", always in the DOM</li>
+    <li>Change its text only when results settle</li>
+    <li>Debounce the search; short message, a count</li>
+    <li>Polite, never assertive</li>
+    <li>Long work: announce states, not percentages</li>
+  </ul>
+</section>
+
+<section id="q3" data-part="11" data-cue="Review a custom dropdown built from divs. What's missing?" data-voice="interviewer">
+  <div class="kicker">Question 3 of 5</div>
+  <p class="question">Review a custom dropdown built from divs. What's missing?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a3" data-part="11" data-cue="First, why not a native select?">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Why not a native select?</li>
+    <li>Name, roles (combobox, listbox, option), expanded and selected state</li>
+    <li>Keys: Tab, arrows, Enter, Escape, Home, End, typeahead</li>
+    <li>Focus returns on close; visible ring; target size</li>
+    <li>A tested headless library; lint flags the click-only div</li>
+  </ul>
+</section>
+
+<section id="q4" data-part="11" data-cue="Which WCAG 2.2 criteria does a sticky header most often break?" data-voice="interviewer">
+  <div class="kicker">Question 4 of 5</div>
+  <p class="question">Which WCAG 2.2 criteria does a sticky header most often break?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a4" data-part="11" data-cue="Focus Not Obscured, at AA: tabbing backwards">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Focus Not Obscured (AA): fix with scroll-padding-top</li>
+    <li>Reflow: at 400% zoom, let the header scroll away</li>
+    <li>Target Size: 24 × 24 CSS px, or spacing</li>
+    <li>Check with a keyboard at high zoom, not only axe</li>
+  </ul>
+</section>
+
+<section id="q5" data-part="11" data-cue="How would you make accessibility part of the definition of done for a whole team?" data-voice="interviewer">
+  <div class="kicker">Question 5 of 5</div>
+  <p class="question">How would you make accessibility part of the definition of done for a whole team?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a5" data-part="11" data-cue="Make the right thing cheap and the wrong thing hard to ship">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Accessible primitives in the design system</li>
+    <li>Template lint and axe, blocking in CI</li>
+    <li>Keyboard pass per PR; screen-reader pass per release</li>
+    <li>Design annotations; bugs triaged by severity</li>
+    <li>A champion per team, with training</li>
+  </ul>
+</section>
+
+<!-- ───────────── Recap ───────────── -->
+<template id="recap">
+  <h2>Five things to remember</h2>
+  <ol class="recap">
+    <li class="item">Restore what the page load did: title, focus on the h1, an announcement. Not for query-only changes.</li>
+    <li class="item">Live regions exist before their text changes; announce results and states when they settle.</li>
+    <li class="item">One alert per form. Busy, not disabled. Removed the focused element? Decide where focus goes.</li>
+    <li class="item">Native elements first. ARIA only fills gaps.</li>
+    <li class="item">Lint, axe, a keyboard path, and people with screen readers.</li>
+  </ol>
+</template>
+<section id="recap-0" data-part="12" data-cue="Five things to remember" data-template="recap" data-show="0"></section>
+<section id="recap-1" data-part="12" data-cue="One: a single-page app removes the page load" data-template="recap" data-show="1"></section>
+<section id="recap-2" data-part="12" data-cue="Two: live regions must exist before their text changes" data-template="recap" data-show="2"></section>
+<section id="recap-3" data-part="12" data-cue="Three: one alert per form" data-template="recap" data-show="3"></section>
+<section id="recap-4" data-part="12" data-cue="Four: native elements first" data-template="recap" data-show="4"></section>
+<section id="recap-5" data-part="12" data-cue="Five: test at every level" data-template="recap" data-show="5"></section>
+
+<section id="next" data-part="12" data-cue="In the next lesson">
+  <div class="kicker">Next</div>
+  <h1>06 · Performance Budgets and Web Vitals</h1>
+  <p class="lead">What goes in the initial bundle, how Coursewright keeps it there, and how to find a slow interaction on a low-end phone.</p>
+</section>
+
+<script src="../assets/slides.js"></script>
+</body>
+</html>

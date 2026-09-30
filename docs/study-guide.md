@@ -8,6 +8,8 @@ This guide maps each technical area of the role to the code in this repo. The ro
 
 Paths are relative to the repo root. `web/` means `apps/web/src/app/` and `bff/` means `apps/bff/src/`.
 
+Each section has a narrated lesson (audio and video) in [`instructional/`](instructional/), and every lesson's interview questions are collected in [`instructional/interview-questions.md`](instructional/interview-questions.md).
+
 ## Suggested order
 
 | Session | Sections | Time |

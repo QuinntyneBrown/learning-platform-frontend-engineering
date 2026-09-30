@@ -1,0 +1,805 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 07 Slides</title>
+<!--
+  Slides for the lesson 07 video. Each <section> is one slide. data-cue is a phrase from script.md:
+  tools/instructional-video/build.cs shows the slide from the moment the narration reaches that phrase.
+  Open this file in a browser and use the arrow keys to step through the deck.
+-->
+<link rel="stylesheet" href="../assets/slides.css">
+</head>
+<body data-lesson-number="07" data-lesson-title="Contract-First REST from the Frontend" data-parts="Introduction|The questions|Why contract-first|The contract|YAML to compiler|Holding the server|Status codes|ETag and 304|Idempotency|The rename|Traps|Interview drill|Recap">
+
+<!-- ───────────── Intro ───────────── -->
+<section id="title" data-part="0">
+  <div class="kicker">Coursewright frontend · Lesson 07</div>
+  <h1>Contract-First REST<br>from the Frontend</h1>
+  <p class="lead">One hand-written OpenAPI file, generated types, both sides held to it, and changes made additively.</p>
+</section>
+
+<!-- ───────────── Questions ───────────── -->
+<section id="questions" data-part="1" data-cue="The questions this lesson answers">
+  <h2>The questions this lesson answers</h2>
+  <ul>
+    <li>Rename durationMinutes to duration with zero downtime?</li>
+    <li>Same Idempotency-Key, same or different body: what does the server do?</li>
+    <li>Where does each status code end up in a form's UI?</li>
+    <li>ETag vs Cache-Control: max-age: what's saved, what's risked?</li>
+    <li>How do you detect contract drift between two teams?</li>
+  </ul>
+</section>
+
+<section id="thesis" data-part="1" data-cue="Keep one sentence in your head while you listen">
+  <div class="kicker">The thesis</div>
+  <p class="quote">The contract is <span class="accent">code</span>: write it first, generate from it, validate against it on both sides, and change it <span class="accent">additively</span>.</p>
+</section>
+
+<!-- ───────────── Why contract-first ───────────── -->
+<section id="adr-context" data-part="2" data-cue="Open docs/adr/0002-contract-first-rest.md">
+  <div class="kicker">ADR-0002 · Context</div>
+  <p class="quote">Drift between them shows up as <span class="amber">undefined</span> in a template, found by a user.</p>
+  <div class="file" style="margin-top:48px">docs/adr/0002-contract-first-rest.md</div>
+</section>
+
+<section id="adr-decision" data-part="2" data-cue="The decision is that contracts/openapi.yaml">
+  <h2>One source of truth, checked four ways</h2>
+  <svg width="1640" height="560" viewBox="0 0 1640 560">
+    <defs><marker id="arrow-cf" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="0" y="200" width="360" height="160" rx="18" fill="#121b2f" stroke="#38bdf8" stroke-width="3"/>
+    <text x="180" y="268" fill="#e8eef8" font-size="32" font-weight="600" text-anchor="middle">openapi.yaml</text>
+    <text x="180" y="310" fill="#8ea2c0" font-size="22" text-anchor="middle">hand-written, reviewed</text>
+    <line x1="365" y1="240" x2="545" y2="110" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-cf)"/>
+    <text x="180" y="180" fill="#8ea2c0" font-size="20" text-anchor="middle">openapi-typescript</text>
+    <rect x="555" y="40" width="360" height="130" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="735" y="100" fill="#e8eef8" font-size="30" font-weight="600" text-anchor="middle">schema.d.ts</text>
+    <text x="735" y="138" fill="#8ea2c0" font-size="22" text-anchor="middle">generated types</text>
+    <line x1="920" y1="90" x2="1065" y2="60" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-cf)"/>
+    <line x1="920" y1="130" x2="1065" y2="170" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-cf)"/>
+    <rect x="1075" y="10" width="565" height="90" rx="16" fill="#0f2233" stroke="#1f5f7f" stroke-width="2"/>
+    <text x="1357" y="65" fill="#e8eef8" font-size="26" text-anchor="middle">web: core/api/models.ts</text>
+    <rect x="1075" y="125" width="565" height="90" rx="16" fill="#0f2233" stroke="#1f5f7f" stroke-width="2"/>
+    <text x="1357" y="180" fill="#e8eef8" font-size="26" text-anchor="middle">BFF: route handler types</text>
+    <line x1="365" y1="320" x2="1065" y2="310" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-cf)"/>
+    <text x="700" y="298" fill="#8ea2c0" font-size="20" text-anchor="middle">loaded at runtime</text>
+    <rect x="1075" y="260" width="565" height="90" rx="16" fill="#0f2233" stroke="#1f5f7f" stroke-width="2"/>
+    <text x="1357" y="315" fill="#e8eef8" font-size="26" text-anchor="middle">BFF: request bodies validated</text>
+    <line x1="365" y1="345" x2="1065" y2="430" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-cf)"/>
+    <rect x="1075" y="395" width="565" height="90" rx="16" fill="#0f2233" stroke="#1f5f7f" stroke-width="2"/>
+    <text x="1357" y="450" fill="#e8eef8" font-size="26" text-anchor="middle">contract test: every response</text>
+    <rect x="0" y="440" width="700" height="100" rx="16" fill="#221b0d" stroke="#f5b544" stroke-width="2"/>
+    <text x="350" y="485" fill="#e8eef8" font-size="24" text-anchor="middle">CI: pnpm contracts:check</text>
+    <text x="350" y="520" fill="#f5b544" font-size="22" text-anchor="middle">fails if schema.d.ts is stale</text>
+  </svg>
+</section>
+
+<section id="adr-semantics" data-part="2" data-cue="The same ADR fixes the HTTP semantics the UI relies on">
+  <h2>The HTTP semantics the UI relies on</h2>
+  <table>
+    <tr><th>Concern</th><th>Choice</th><th>Why</th></tr>
+    <tr><td>Errors</td><td>RFC 9457 problem+json, with traceId</td><td>One error shape; the trace ID links a report to the logs</td></tr>
+    <tr><td>Pagination</td><td>Keyset cursor, ordered by (title, id)</td><td>Stable under inserts; constant cost at any depth</td></tr>
+    <tr><td>Caching</td><td>Strong ETag + If-None-Match → 304</td><td>Cheap revalidation without stale data</td></tr>
+    <tr><td>Retries</td><td>Idempotency-Key on POST /enrollments</td><td>A retry or double submit can't enroll twice</td></tr>
+    <tr><td>Tenancy</td><td>Another tenant's resource is a 404</td><td>A 403 would confirm it exists</td></tr>
+  </table>
+  <div class="file" style="margin-top:28px">docs/adr/0002-contract-first-rest.md · condensed</div>
+</section>
+
+<!-- ───────────── The contract ───────────── -->
+<section id="conventions" data-part="3" data-cue="Skim openapi.yaml from the top">
+  <h2>The conventions, at the top of the file</h2>
+  <div class="file">contracts/openapi.yaml · excerpt</div>
+  <pre class="code tight" data-lang="yaml" data-mark="8,11,12">info:
+  # …
+  description: |
+    The backend-for-frontend that the Coursewright web app calls. This file is the
+    source of truth: `schema.d.ts` is generated from it, the web app and the BFF both
+    import those types, and the BFF's contract tests validate real responses against it.
+
+    Conventions:
+    - Errors are RFC 9457 problem details (`application/problem+json`).
+    - Every request may carry a W3C `traceparent` header; the BFF continues that trace
+      and returns `traceparent` on the response.
+    - The tenant comes from the access token, never from the request. A resource that
+      belongs to another tenant is a 404, not a 403, so its existence doesn't leak.</pre>
+</section>
+
+<section id="strict" data-part="3" data-cue="Two details in the schemas matter later">
+  <h2>Strict in both directions</h2>
+  <div class="file">contracts/openapi.yaml · excerpt</div>
+  <pre class="code tight" data-lang="yaml" data-mark="3,4,9">CourseSummary:
+  type: object
+  required: [id, title, summary, level, durationMinutes]
+  additionalProperties: false
+  properties:
+    id:
+      type: string
+    # …
+    durationMinutes:
+      type: integer
+      minimum: 1</pre>
+  <div class="cols">
+    <p class="small"><span class="accent">Requests</span>: the BFF rejects an unknown field with 400</p>
+    <p class="small"><span class="accent">Responses</span>: the contract test rejects an undescribed field</p>
+  </div>
+</section>
+
+<section id="enroll-op" data-part="3" data-cue="Error responses are shared definitions">
+  <h2>Behaviour, documented with the shape</h2>
+  <div class="file">contracts/openapi.yaml · excerpt</div>
+  <pre class="code tight" data-lang="yaml" data-mark="6,7,8">/enrollments:
+  post:
+    operationId: enroll
+    summary: Enroll the caller in a course. Idempotent per `Idempotency-Key`.
+    description: |
+      The client creates one `Idempotency-Key` per user intent and reuses it on retries.
+      A repeat with the same key and body returns the original `201` response, with
+      `Idempotency-Replayed: true`. The same key with a different body is a `422`.
+    # …
+      '409':
+        $ref: '#/components/responses/Conflict'
+      '422':
+        $ref: '#/components/responses/UnprocessableContent'</pre>
+  <p class="small muted">Shared responses: BadRequest · Unauthorized · Forbidden · NotFound · Conflict · UnprocessableContent, each application/problem+json.</p>
+</section>
+
+<!-- ───────────── YAML to compiler ───────────── -->
+<section id="contracts-package" data-part="4" data-cue="Open contracts/package.json">
+  <h2>The contracts package</h2>
+  <div class="file">contracts/package.json · excerpt</div>
+  <pre class="code tight" data-lang="json" data-mark="3,5,8">"exports": {
+  ".": {
+    "types": "./schema.d.ts"
+  },
+  "./openapi.yaml": "./openapi.yaml"
+},
+"scripts": {
+  "generate": "openapi-typescript openapi.yaml --output schema.d.ts"
+},</pre>
+  <p class="small muted">"The BFF's REST contract. openapi.yaml is hand-written and reviewed; schema.d.ts is generated from it."</p>
+</section>
+
+<section id="contracts-check" data-part="4" data-cue="The root package.json has two scripts">
+  <h2>Stale types fail CI</h2>
+  <div class="file">package.json · excerpt</div>
+  <pre class="code tight" data-lang="json" data-mark="2">"contracts:generate": "pnpm --filter @coursewright/contracts run generate",
+"contracts:check": "pnpm contracts:generate &amp;&amp; git diff --exit-code -- contracts/"</pre>
+  <div class="file">.github/workflows/ci.yml · excerpt</div>
+  <pre class="code tight" data-lang="yaml" data-mark="1,3"># The generated contract types must match openapi.yaml exactly.
+- name: Contract drift
+  run: pnpm contracts:check</pre>
+  <p class="small muted">The first check after install: before lint, tests and the build.</p>
+</section>
+
+<section id="models" data-part="4" data-cue="On the web side, open apps/web/src/app/core/api/models.ts">
+  <h2>No hand-written wire types</h2>
+  <div class="file">apps/web/src/app/core/api/models.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,2,10">// Wire types come from the generated contract, never from hand-written interfaces: when
+// openapi.yaml changes, `pnpm contracts:generate` updates these and the compiler finds every caller.
+import type { components, operations } from '@coursewright/contracts';
+
+type Schemas = components['schemas'];
+// …
+export type CourseSummary = Schemas['CourseSummary'];
+export type CoursePage = Schemas['CoursePage'];
+// …
+export type CourseSearchParams = NonNullable&lt;operations['searchCourses']['parameters']['query']&gt;;</pre>
+</section>
+
+<section id="api" data-part="4" data-cue="Then core/api/coursewright-api.ts">
+  <h2>One typed service</h2>
+  <div class="file">apps/web/src/app/core/api/coursewright-api.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="6,12">/** Typed access to the BFF. Every path is same-origin under /api; see contracts/openapi.yaml. */
+export class CoursewrightApi {
+  // …
+  searchCourses({ q, cursor, limit }: CourseSearchParams): Observable&lt;CoursePage&gt; {
+    // …
+    return this.http.get&lt;CoursePage&gt;('/api/courses', { params });
+  }
+  // …
+  enroll(courseId: string, idempotencyKey: string): Observable&lt;Enrollment&gt; {
+    const body: EnrollmentRequest = { courseId };
+    return this.http.post&lt;Enrollment&gt;('/api/enrollments', body, {
+      headers: { 'Idempotency-Key': idempotencyKey },
+    });
+  }</pre>
+</section>
+
+<section id="typed-limit" data-part="4" data-cue="Here's the honest limit">
+  <h2>A typed call is not a check</h2>
+  <div class="cols">
+    <div class="card legacy">
+      <h3 class="amber">http.get&lt;CoursePage&gt;(…)</h3>
+      <p>A promise to the compiler. Paths are plain strings. Nothing checks the body at runtime.</p>
+    </div>
+    <div class="card modern">
+      <h3>What makes the trust reasonable</h3>
+      <p>The server is held to the same contract. Production could add a generated client that types paths and parameters too.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── Holding the server ───────────── -->
+<section id="contract-ts" data-part="5" data-cue="Open apps/bff/src/contract.ts">
+  <h2>Requests validated against the contract itself</h2>
+  <div class="file">apps/bff/src/contract.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="3,4">/**
+ * The contract's component schemas as standalone JSON Schemas, ready for Fastify's `addSchema`
+ * or Ajv. Each gets `$id: &lt;its name&gt;`, so a route validates its body against the contract itself
+ * with `{ $ref: 'LoginRequest#' }` and the BFF can't quietly drift from openapi.yaml.
+ */
+export function componentSchemas(contract: OpenApiDocument): JsonSchema[] {</pre>
+  <div class="file">apps/bff/src/app.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts">for (const schema of componentSchemas(loadContract())) app.addSchema(schema);</pre>
+  <div class="file">apps/bff/src/routes/enrollments.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1">{ schema: { headers: enrollHeadersSchema, body: { $ref: 'EnrollmentRequest#' } } },</pre>
+</section>
+
+<section id="contract-test" data-part="5" data-cue="Then the proof: apps/bff/test/contract.test.ts">
+  <h2>Every real response, checked</h2>
+  <div class="file">apps/bff/test/contract.test.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="6,9,13">/** Fails unless this status, content type and body are all documented for the operation. */
+function expectToMatchContract(
+  // …
+): void {
+  const label = `${method.toUpperCase()} ${path} ${response.statusCode}`;
+  const documented = documentedResponse(method, path, response.statusCode);
+  expect(documented, `${label} is not in the contract`).toBeDefined();
+  // …
+  const schema = documented.content[mediaType]?.schema;
+  expect(schema, `${label} doesn't document ${mediaType}`).toBeDefined();
+
+  const validate = ajv.compile(toSharedRefs(schema) as JsonSchema);
+  const body: unknown = mediaType.endsWith('json') ? response.json() : response.body;
+  expect(validate(body), `${label}: ${ajv.errorsText(validate.errors)}`).toBe(true);</pre>
+</section>
+
+<section id="coverage" data-part="5" data-cue="The last test is the clever one">
+  <h2>Every documented response, exercised</h2>
+  <div class="file">apps/bff/test/contract.test.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="7">it('covers every response the contract documents', () =&gt; {
+  const documented = Object.entries(contract.paths).flatMap(([path, operations]) =&gt;
+    Object.entries(operations as Record&lt;string, Operation&gt;).flatMap(([method, { responses }]) =&gt;
+      Object.keys(responses).map((status) =&gt; `${method} ${path} ${status}`),
+    ),
+  );
+  expect([...exercised].sort()).toEqual(documented.sort());
+});</pre>
+  <div class="file">apps/bff/test/contract.test.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="3,4,5">await expectCall(201, 'post', '/enrollments', enroll('contract-key-1', 'crs-acme-005'));
+// The same key and body again: a replay of the first 201.
+await expectCall(201, 'post', '/enrollments', enroll('contract-key-1', 'crs-acme-005'));
+await expectCall(422, 'post', '/enrollments', enroll('contract-key-1', 'crs-acme-006'));
+await expectCall(409, 'post', '/enrollments', enroll('contract-key-2', 'crs-acme-005'));</pre>
+</section>
+
+<section id="catches" data-part="5" data-cue="That answers what the contract test catches that TypeScript can't">
+  <h2>What TypeScript can't see</h2>
+  <ul class="checks">
+    <li>A required field missing from the body</li>
+    <li>A wrong enum value</li>
+    <li>null where the schema says string</li>
+    <li>An extra field (additionalProperties: false)</li>
+    <li>A status the contract doesn't document, or one nobody tests</li>
+  </ul>
+</section>
+
+<!-- ───────────── Status codes ───────────── -->
+<section id="problem-bff" data-part="6" data-cue="Now errors. Open apps/bff/src/problem.ts">
+  <h2>One error shape: RFC 9457</h2>
+  <div class="file">apps/bff/src/problem.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="10,13">/**
+ * Sends an RFC 9457 problem. Without a `type` it is `about:blank`, whose title is the HTTP status
+ * text, as the RFC asks.
+ */
+export function sendProblem(reply: FastifyReply, problem: ProblemInit): FastifyReply {
+  const { status, type = 'about:blank', title = STATUS_CODES[status] ?? 'Error', detail } = problem;
+  return reply
+    .code(status)
+    .type('application/problem+json')
+    .send({ type, title, status, detail, traceId: reply.request.id });
+}
+// …
+    // Don't echo internals to the client. The traceId in the body finds this log line.
+    return sendProblem(reply, { status: 500 });</pre>
+</section>
+
+<section id="problem-web" data-part="6" data-cue="On the web, core/problem.ts turns any error into a sentence">
+  <h2>One function turns errors into sentences</h2>
+  <div class="file">apps/web/src/app/core/problem.ts · excerpt</div>
+  <pre class="code" data-lang="ts" data-mark="6,7">const FALLBACK = 'Something went wrong. Please try again.';
+
+/** A message fit to show a user, from an RFC 9457 problem+json error when the BFF sent one. */
+export function problemMessage(error: unknown, fallback = FALLBACK): string {
+  if (!(error instanceof HttpErrorResponse)) return fallback;
+  if (error.status === 0) return 'Unable to reach the server. Check your connection and try again.';
+  return isProblem(error.error) ? (error.error.detail ?? error.error.title) : fallback;
+}</pre>
+  <p class="small muted">Called by the login, catalog, course and reports features: error wording has one owner.</p>
+</section>
+
+<section id="status-map" data-part="6" data-cue="So where does each status end up?">
+  <h2>Where each status ends up</h2>
+  <table>
+    <tr><th>Status</th><th>Where it ends up</th><th>In Coursewright</th></tr>
+    <tr><td>400</td><td>The form's one alert (rare: validate first)</td><td>The problem's detail</td></tr>
+    <tr><td>401</td><td>Interceptor: refresh once, retry once (lesson 08)</td><td>Sign-in: "Username or password is incorrect."</td></tr>
+    <tr><td>403</td><td>A message; don't offer the action</td><td>roleGuard hides Reports; the server decides</td></tr>
+    <tr><td>404</td><td>The page changes, not an alert</td><td>h1 "Course not found"</td></tr>
+    <tr><td>409</td><td>Can be success</td><td>Already enrolled → "You're enrolled"</td></tr>
+    <tr><td>422</td><td>A bug to log</td><td>Idempotency key reused</td></tr>
+    <tr><td>0, 5xx</td><td>Retry with backoff, then a message</td><td>Enroll: 300 ms, then 600 ms</td></tr>
+  </table>
+</section>
+
+<section id="enroll-409" data-part="6" data-cue="A 409 on enroll means already enrolled">
+  <h2>409 as success, 4xx never retried</h2>
+  <div class="file">apps/web/src/app/features/course/enrollment-controller.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,3,6,7,8">/** Retry network failures and 5xx only; a 4xx won't change by asking again. */
+const isTransient = (error: unknown) =&gt;
+  error instanceof HttpErrorResponse &amp;&amp; (error.status === 0 || error.status &gt;= 500);
+// …
+      catchError((error: unknown) =&gt; {
+        // 409: already enrolled (say, from another tab). For the user, that's success.
+        if (error instanceof HttpErrorResponse &amp;&amp; error.status === 409) {
+          this.succeed();
+        } else {
+          this.status.set('error');
+          this.error.set(problemMessage(error));
+        }
+        return EMPTY;
+      }),</pre>
+</section>
+
+<!-- ───────────── ETag and 304 ───────────── -->
+<section id="etag-code" data-part="7" data-cue="Open apps/bff/src/routes/courses.ts and find the course detail handler">
+  <h2>A strong ETag from the exact bytes</h2>
+  <div class="file">apps/bff/src/routes/courses.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="4,7,10">// Hash the exact bytes we send, so the ETag changes whenever the body does, `enrolled`
+// included. A 304 saves the transfer and the client's parse, not the query.
+const body = JSON.stringify(course);
+const etag = `"${sha256(body)}"`;
+// `private`: the body is per-user, so shared caches must not keep it.
+// `no-cache`: the browser may keep it but must revalidate first, which the ETag makes cheap.
+reply.header('etag', etag).header('cache-control', 'private, no-cache');
+
+if (matchesIfNoneMatch(request.headers['if-none-match'], etag)) {
+  return reply.code(304).send();
+}
+return reply.type('application/json; charset=utf-8').send(body);</pre>
+</section>
+
+<section id="etag-flow" data-part="7" data-cue="The web app has no code for this">
+  <h2>The browser's cache does the revalidation</h2>
+  <svg width="1640" height="560" viewBox="0 0 1640 560">
+    <defs><marker id="arrow-et" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="60" y="0" width="340" height="64" rx="12" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="230" y="42" fill="#e8eef8" font-size="24" text-anchor="middle">CoursePage (httpResource)</text>
+    <rect x="650" y="0" width="340" height="64" rx="12" fill="#121b2f" stroke="#38bdf8" stroke-width="2"/>
+    <text x="820" y="42" fill="#e8eef8" font-size="24" text-anchor="middle">Browser HTTP cache</text>
+    <rect x="1240" y="0" width="340" height="64" rx="12" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="1410" y="42" fill="#e8eef8" font-size="24" text-anchor="middle">BFF</text>
+    <line x1="230" y1="70" x2="230" y2="550" stroke="#22304d" stroke-width="3" stroke-dasharray="6 8"/>
+    <line x1="820" y1="70" x2="820" y2="550" stroke="#22304d" stroke-width="3" stroke-dasharray="6 8"/>
+    <line x1="1410" y1="70" x2="1410" y2="550" stroke="#22304d" stroke-width="3" stroke-dasharray="6 8"/>
+    <line x1="235" y1="110" x2="812" y2="110" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-et)"/>
+    <text x="520" y="98" fill="#e8eef8" font-size="22" text-anchor="middle">GET /api/courses/crs-acme-002</text>
+    <line x1="825" y1="150" x2="1402" y2="150" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-et)"/>
+    <text x="1115" y="138" fill="#8ea2c0" font-size="22" text-anchor="middle">nothing cached: plain GET</text>
+    <line x1="1405" y1="200" x2="828" y2="200" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-et)"/>
+    <text x="1115" y="188" fill="#e8eef8" font-size="22" text-anchor="middle">200 · ETag "…" · private, no-cache</text>
+    <line x1="815" y1="240" x2="238" y2="240" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-et)"/>
+    <text x="520" y="228" fill="#8ea2c0" font-size="22" text-anchor="middle">200, and stored</text>
+    <line x1="0" y1="285" x2="1640" y2="285" stroke="#22304d" stroke-width="2"/>
+    <text x="10" y="315" fill="#8ea2c0" font-size="20">later</text>
+    <line x1="235" y1="350" x2="812" y2="350" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-et)"/>
+    <text x="520" y="338" fill="#e8eef8" font-size="22" text-anchor="middle">the same GET</text>
+    <line x1="825" y1="400" x2="1402" y2="400" stroke="#38bdf8" stroke-width="3" marker-end="url(#arrow-et)"/>
+    <text x="1115" y="388" fill="#38bdf8" font-size="22" text-anchor="middle">If-None-Match: "…"</text>
+    <line x1="1405" y1="450" x2="828" y2="450" stroke="#38bdf8" stroke-width="3" marker-end="url(#arrow-et)"/>
+    <text x="1115" y="438" fill="#38bdf8" font-size="22" text-anchor="middle">304 · no body</text>
+    <line x1="815" y1="500" x2="238" y2="500" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-et)"/>
+    <text x="520" y="488" fill="#e8eef8" font-size="22" text-anchor="middle">200, from the cache</text>
+  </svg>
+</section>
+
+<section id="etag-vs-maxage" data-part="7" data-cue="That's the fourth question. An ETag saves the transfer">
+  <h2>ETag or max-age?</h2>
+  <div class="cols">
+    <div class="card modern">
+      <h3>ETag + no-cache</h3>
+      <ul>
+        <li>Saves: the bytes</li>
+        <li>Costs: a round trip, and the query</li>
+        <li>Risk: none. Never stale</li>
+      </ul>
+    </div>
+    <div class="card legacy">
+      <h3 class="amber">max-age=N</h3>
+      <ul>
+        <li>Saves: the whole request, for N seconds</li>
+        <li>Risk: stale data you can't recall</li>
+        <li>Per-user data: private, always</li>
+      </ul>
+    </div>
+  </div>
+  <p class="small muted" style="margin-top:36px">A short max-age plus an ETag suits shared, slow-changing data. Per-user state: revalidate.</p>
+</section>
+
+<!-- ───────────── Idempotency ───────────── -->
+<section id="idem-intro" data-part="8" data-cue="Lesson three covered the client side">
+  <h2>The server side of idempotency</h2>
+  <div class="file">apps/bff/src/routes/enrollments.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="3,4,9">const enrollHeadersSchema = {
+  type: 'object',
+  required: ['idempotency-key'],
+  properties: { 'idempotency-key': { type: 'string', minLength: 8, maxLength: 100 } },
+} as const;
+// …
+// Hash the validated fields in a fixed order, so whitespace or key order in the raw body
+// can't make one request look like two.
+const requestHash = sha256(JSON.stringify({ courseId }));</pre>
+  <p class="small muted">The client side, one key per intent reused on retries, is lesson 03.</p>
+</section>
+
+<section id="idem-flow" data-part="8" data-cue="Then it looks up the user and the key">
+  <h2>POST /enrollments, decision by decision</h2>
+  <svg width="1640" height="560" viewBox="0 0 1640 560">
+    <defs><marker id="arrow-id" markerUnits="userSpaceOnUse" markerWidth="20" markerHeight="20" refX="18" refY="10" orient="auto"><path d="M0,0 L20,10 L0,20 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="0" y="30" width="300" height="100" rx="16" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="150" y="75" fill="#e8eef8" font-size="24" text-anchor="middle">POST + key</text>
+    <text x="150" y="108" fill="#8ea2c0" font-size="20" text-anchor="middle">{ courseId }</text>
+    <line x1="305" y1="80" x2="365" y2="80" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-id)"/>
+    <rect x="375" y="30" width="300" height="100" rx="16" fill="#121b2f" stroke="#38bdf8" stroke-width="3"/>
+    <text x="525" y="75" fill="#e8eef8" font-size="24" text-anchor="middle">Key seen for</text>
+    <text x="525" y="105" fill="#e8eef8" font-size="24" text-anchor="middle">this user?</text>
+    <line x1="680" y1="80" x2="760" y2="80" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-id)"/>
+    <text x="712" y="62" fill="#8ea2c0" font-size="20" text-anchor="middle">yes</text>
+    <rect x="770" y="30" width="300" height="100" rx="16" fill="#121b2f" stroke="#38bdf8" stroke-width="3"/>
+    <text x="920" y="88" fill="#e8eef8" font-size="24" text-anchor="middle">Same hash?</text>
+    <line x1="1075" y1="80" x2="1155" y2="80" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-id)"/>
+    <text x="1107" y="62" fill="#8ea2c0" font-size="20" text-anchor="middle">yes</text>
+    <rect x="1165" y="30" width="475" height="100" rx="16" fill="#0f2233" stroke="#1f5f7f" stroke-width="3"/>
+    <text x="1402" y="75" fill="#e8eef8" font-size="24" text-anchor="middle">Replay the saved 201</text>
+    <text x="1402" y="108" fill="#8ea2c0" font-size="20" text-anchor="middle">Idempotency-Replayed: true</text>
+    <line x1="920" y1="135" x2="920" y2="185" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-id)"/>
+    <text x="940" y="165" fill="#8ea2c0" font-size="20">no</text>
+    <rect x="770" y="195" width="300" height="80" rx="16" fill="#221b0d" stroke="#f5b544" stroke-width="2"/>
+    <text x="920" y="243" fill="#e8eef8" font-size="24" text-anchor="middle">422 · key reused</text>
+    <line x1="525" y1="135" x2="525" y2="305" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-id)"/>
+    <text x="540" y="230" fill="#8ea2c0" font-size="20">no</text>
+    <rect x="375" y="315" width="300" height="90" rx="16" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="525" y="368" fill="#e8eef8" font-size="24" text-anchor="middle">Course in tenant?</text>
+    <line x1="370" y1="360" x2="310" y2="360" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-id)"/>
+    <text x="345" y="340" fill="#8ea2c0" font-size="20" text-anchor="middle">no</text>
+    <rect x="0" y="320" width="300" height="80" rx="16" fill="#221b0d" stroke="#f5b544" stroke-width="2"/>
+    <text x="150" y="368" fill="#e8eef8" font-size="24" text-anchor="middle">404</text>
+    <line x1="525" y1="410" x2="525" y2="450" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-id)"/>
+    <rect x="375" y="460" width="300" height="90" rx="16" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="525" y="513" fill="#e8eef8" font-size="24" text-anchor="middle">Already enrolled?</text>
+    <line x1="370" y1="505" x2="310" y2="505" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-id)"/>
+    <text x="345" y="485" fill="#8ea2c0" font-size="20" text-anchor="middle">yes</text>
+    <rect x="0" y="465" width="300" height="80" rx="16" fill="#221b0d" stroke="#f5b544" stroke-width="2"/>
+    <text x="150" y="513" fill="#e8eef8" font-size="24" text-anchor="middle">409</text>
+    <line x1="680" y1="505" x2="760" y2="505" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-id)"/>
+    <text x="712" y="487" fill="#8ea2c0" font-size="20" text-anchor="middle">no</text>
+    <rect x="770" y="445" width="870" height="110" rx="16" fill="#0f2233" stroke="#38bdf8" stroke-width="3"/>
+    <text x="1205" y="492" fill="#e8eef8" font-size="24" text-anchor="middle">One transaction: the enrollment + the saved response</text>
+    <text x="1205" y="528" fill="#8ea2c0" font-size="20" text-anchor="middle">then 201</text>
+  </svg>
+</section>
+
+<section id="idem-replay" data-part="8" data-cue="With the same hash, it replays the saved status and body">
+  <h2>422 for misuse, a replay for a retry</h2>
+  <div class="file">apps/bff/src/routes/enrollments.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2,3,4,10">if (saved) {
+  if (saved.request_hash !== requestHash) {
+    return sendProblem(reply, {
+      status: 422,
+      type: '/problems/idempotency-key-reused',
+      // …
+    });
+  }
+  return reply
+    .code(saved.status_code)
+    .header('idempotency-replayed', 'true')
+    .type('application/json; charset=utf-8')
+    .send(saved.response_body);
+}</pre>
+</section>
+
+<section id="idem-transaction" data-part="8" data-cue="saves the enrollment and its replayable response in one transaction">
+  <h2>Saved together, or not at all</h2>
+  <div class="file">apps/bff/src/routes/enrollments.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,2">// The enrollment and its replayable response are saved together, or not at all.
+transaction(db, () =&gt; {
+  db.prepare(
+    'INSERT INTO enrollments (id, user_id, course_id, enrolled_at) VALUES (?, ?, ?, ?)',
+  ).run(enrollment.id, userId, courseId, enrollment.enrolledAt);
+  db.prepare(
+    `INSERT INTO idempotency_keys
+       (user_id, key, request_hash, status_code, response_body, created_at)
+     VALUES (?, ?, ?, 201, ?, ?)`,
+  ).run(userId, key, requestHash, body, enrollment.enrolledAt);
+});
+
+return reply.code(201).type('application/json; charset=utf-8').send(body);</pre>
+</section>
+
+<section id="idem-concurrency" data-part="8" data-cue="The comment covers concurrency honestly">
+  <h2>Concurrency, stated honestly</h2>
+  <div class="file">apps/bff/src/routes/enrollments.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="5,6,7,8">/**
+ * Idempotent per (user, Idempotency-Key): a retry after a timeout replays the first response
+ * instead of enrolling twice.
+ *
+ * DatabaseSync is synchronous, so from the key lookup to the final insert nothing else runs in
+ * this process: two requests with the same key can't interleave. With several instances sharing
+ * a database, you'd insert the key row first, marked in progress, and let its primary key reject
+ * the concurrent duplicate (answering 409 "in progress"), then save the response on that row.
+ */</pre>
+  <div class="file">apps/bff/src/db.ts · excerpt</div>
+  <pre class="code tight" data-lang="sql" data-mark="2">-- One row per (user, Idempotency-Key): the request's hash and the response to replay.
+-- created_at lets a sweeper expire keys after a day, as payment APIs do.
+CREATE TABLE idempotency_keys (</pre>
+  <p class="small amber">No sweeper is written yet.</p>
+</section>
+
+<section id="why-hash" data-part="8" data-cue="That's the second question. Without the hash">
+  <h2>Why store a hash of the request?</h2>
+  <div class="cols">
+    <div class="card legacy"><h3 class="amber">The key alone</h3><p>A client bug reuses a key for another course. The server replays the first course's 201. The user thinks they enrolled; they didn't.</p></div>
+    <div class="card modern"><h3>Key + request hash</h3><p>The same key with a different body is caught: a loud 422, idempotency-key-reused.</p></div>
+  </div>
+  <p class="muted" style="margin-top:40px">UNIQUE (user_id, course_id) stays as the last line for separate intents: 409.</p>
+</section>
+
+<!-- ───────────── The rename ───────────── -->
+<section id="rename-where" data-part="9" data-cue="Now the core question. The backend team wants to rename">
+  <h2>Where durationMinutes lives</h2>
+  <div class="file">git grep -n durationMinutes (outside the generated schema.d.ts) · condensed</div>
+  <pre class="code tight" data-mark="1,2,3,4,5,6,7,8,9">contracts/openapi.yaml:527:        durationMinutes:
+contracts/openapi.yaml:540:        durationMinutes:
+contracts/openapi.yaml:557:        durationMinutes:
+apps/bff/src/routes/courses.ts:100:        durationMinutes: lesson.duration_minutes,
+apps/bff/src/routes/courses.ts:183:    durationMinutes: row.duration_minutes,
+apps/web/src/app/features/catalog/catalog-page.html:27:  … {{ course.durationMinutes }} min&lt;/p&gt;
+apps/web/src/app/features/course/course-page.html:14:     &lt;dd&gt;{{ details.durationMinutes }} minutes&lt;/dd&gt;
+apps/web/src/app/features/course/course-page.html:47:  … {{ lesson.durationMinutes }} min&lt;/span&gt;
+apps/bff/test/courses.test.ts:96:      expect(course.durationMinutes).toBe(total);</pre>
+  <p class="small muted">Three schemas, two BFF mappings, three template reads, a couple of tests.</p>
+</section>
+
+<template id="rename">
+  <h2>Expand, migrate, wait, contract</h2>
+  <svg width="1640" height="470" viewBox="0 0 1640 470">
+    <defs><marker id="arrow-rn" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <g class="item">
+      <rect x="0" y="0" width="380" height="440" rx="18" fill="#0f2233" stroke="#38bdf8" stroke-width="3"/>
+      <text x="30" y="60" fill="#38bdf8" font-size="34" font-weight="600">1 · Expand</text>
+      <text x="30" y="130" fill="#e8eef8" font-size="24">Contract: add duration,</text>
+      <text x="30" y="164" fill="#e8eef8" font-size="24">deprecate the old field</text>
+      <text x="30" y="230" fill="#e8eef8" font-size="24">BFF sends both</text>
+      <text x="30" y="296" fill="#e8eef8" font-size="24">Deploy the BFF</text>
+      <text x="30" y="380" fill="#8ea2c0" font-size="21">Contract first: strict</text>
+      <text x="30" y="410" fill="#8ea2c0" font-size="21">schemas enforce the order</text>
+    </g>
+    <line x1="385" y1="220" x2="415" y2="220" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-rn)"/>
+    <g class="item">
+      <rect x="420" y="0" width="380" height="440" rx="18" fill="#0f2233" stroke="#38bdf8" stroke-width="3"/>
+      <text x="450" y="60" fill="#38bdf8" font-size="34" font-weight="600">2 · Migrate</text>
+      <text x="450" y="130" fill="#e8eef8" font-size="24">Web reads duration</text>
+      <text x="450" y="196" fill="#e8eef8" font-size="24">Types and template</text>
+      <text x="450" y="230" fill="#e8eef8" font-size="24">checks find every use</text>
+      <text x="450" y="296" fill="#e8eef8" font-size="24">Deploy the web app</text>
+    </g>
+    <line x1="805" y1="220" x2="835" y2="220" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-rn)"/>
+    <g class="item">
+      <rect x="840" y="0" width="380" height="440" rx="18" fill="#221b0d" stroke="#f5b544" stroke-width="3"/>
+      <text x="870" y="60" fill="#f5b544" font-size="34" font-weight="600">3 · Wait</text>
+      <text x="870" y="130" fill="#e8eef8" font-size="24">Open tabs run</text>
+      <text x="870" y="164" fill="#e8eef8" font-size="24">yesterday's JavaScript</text>
+      <text x="870" y="230" fill="#e8eef8" font-size="24">Other consumers: longer</text>
+      <text x="870" y="296" fill="#e8eef8" font-size="24">Decide from data</text>
+    </g>
+    <line x1="1225" y1="220" x2="1255" y2="220" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-rn)"/>
+    <g class="item">
+      <rect x="1260" y="0" width="380" height="440" rx="18" fill="#0f2233" stroke="#38bdf8" stroke-width="3"/>
+      <text x="1290" y="60" fill="#38bdf8" font-size="34" font-weight="600">4 · Contract</text>
+      <text x="1290" y="130" fill="#e8eef8" font-size="24">Remove it from the YAML</text>
+      <text x="1290" y="196" fill="#e8eef8" font-size="24">Regenerate: compiler and</text>
+      <text x="1290" y="230" fill="#e8eef8" font-size="24">contract test find the rest</text>
+      <text x="1290" y="296" fill="#e8eef8" font-size="24">BFF stops sending it</text>
+    </g>
+  </svg>
+</template>
+<section id="rename-1" data-part="9" data-cue="Expand first" data-template="rename" data-highlight="1"></section>
+
+<section id="expand-sketch" data-part="9" data-cue="openapi-typescript turns that into a deprecated tag">
+  <h2>Expand: both fields, one deprecated</h2>
+  <div class="file">Sketch · not in this repo · the expand step in contracts/openapi.yaml</div>
+  <pre class="code tight" data-lang="yaml" data-mark="4,5">CourseSummary:
+  required: [id, title, summary, level, durationMinutes, duration]
+  properties:
+    durationMinutes: { type: integer, deprecated: true, description: Use `duration`. }
+    duration: { type: integer }</pre>
+  <div class="file">openapi-typescript 7.13 output for that sketch · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2">/**
+ * @deprecated
+ * @description Use `duration`.
+ */
+durationMinutes: number;
+duration: number;</pre>
+  <p class="small muted">Editors strike through every read of durationMinutes. The BFF sends both, with the same value.</p>
+</section>
+
+<section id="rename-2" data-part="9" data-cue="Migrate next" data-template="rename" data-highlight="2"></section>
+<section id="rename-3" data-part="9" data-cue="Then wait, and this is where frontend knowledge matters" data-template="rename" data-highlight="3"></section>
+<section id="rename-4" data-part="9" data-cue="Contract last" data-template="rename" data-highlight="4"></section>
+
+<section id="request-field" data-part="9" data-cue="For a request field, reverse the order">
+  <h2>Which side moves first?</h2>
+  <div class="cols">
+    <div class="card">
+      <h3>A response field</h3>
+      <p>Server sends both first. Clients switch. Server drops the old one.</p>
+    </div>
+    <div class="card">
+      <h3>A request field</h3>
+      <p>Server accepts both first: a strict schema would reject the new name with a 400. Clients switch. Server stops accepting the old one.</p>
+    </div>
+  </div>
+</section>
+
+<section id="cautions" data-part="9" data-cue="Two cautions">
+  <h2>Two cautions</h2>
+  <div class="cols">
+    <div class="card legacy"><h3 class="amber">A new unit is a new field</h3><p>Minutes to an ISO 8601 duration string isn't a rename. Name the unit.</p></div>
+    <div class="card modern"><h3>The BFF can absorb it</h3><p>A platform service renames its field; the BFF maps it, and the web contract doesn't change.</p></div>
+  </div>
+  <div class="file" style="margin-top:36px">apps/bff/src/routes/courses.ts · excerpt (toCourseSummary)</div>
+  <pre class="code tight" data-lang="ts" data-mark="1">durationMinutes: row.duration_minutes,</pre>
+</section>
+
+<section id="production" data-part="9" data-cue="What production would add">
+  <h2>What production would add</h2>
+  <ul>
+    <li>oasdiff breaking-change check against main (ADR-0002's production note)</li>
+    <li>Consumer-driven contract tests between teams (Pact)</li>
+    <li>A generated client that types paths and parameters</li>
+    <li>Sampled production responses validated against the schema</li>
+  </ul>
+</section>
+
+<!-- ───────────── Traps ───────────── -->
+<section id="traps" data-part="10" data-cue="Hand-writing a wire type just this once">
+  <h2>Traps</h2>
+  <ul class="small">
+    <li>Hand-writing a wire type "just this once"</li>
+    <li>Treating http.get&lt;T&gt; as validation</li>
+    <li>Renaming a field in one release: open tabs break</li>
+    <li>403 for another tenant's resource: it confirms existence</li>
+    <li>A new idempotency key per retry</li>
+    <li>A key without a request hash: silent wrong replays</li>
+    <li>An ETag computed from anything but the bytes sent</li>
+    <li>Error bodies that echo internals instead of a trace ID</li>
+  </ul>
+</section>
+
+<!-- ───────────── Interview drill ───────────── -->
+<section id="drill" data-part="11" data-cue="Let's practise">
+  <div class="kicker">Interview drill</div>
+  <h1>Five questions</h1>
+  <p class="lead">After each question, pause and answer out loud. Then compare with the model answer.</p>
+</section>
+
+<section id="q1" data-part="11" data-cue="The backend team wants to rename durationMinutes to duration. How do you roll it out with zero downtime?" data-voice="interviewer">
+  <div class="kicker">Question 1 of 5</div>
+  <p class="question">The backend team wants to rename durationMinutes to duration. How do you roll it out with zero downtime?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a1" data-part="11" data-cue="Expand, migrate, contract. Add duration to the contract">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Expand: both fields in the contract, old one deprecated</li>
+    <li>BFF sends both; strict schemas force contract-first</li>
+    <li>Migrate the web; types and templates find every use</li>
+    <li>Wait for old tabs and consumers, based on data</li>
+    <li>Then remove. Request fields: server accepts both first</li>
+  </ul>
+</section>
+
+<section id="q2" data-part="11" data-cue="The same Idempotency-Key arrives twice: once with the same body, once with a different one. What does the server do, and why store a hash of the request?" data-voice="interviewer">
+  <div class="kicker">Question 2 of 5</div>
+  <p class="question">The same Idempotency-Key arrives twice: same body, then a different one. What does the server do, and why store a hash?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a2" data-part="11" data-cue="Coursewright stores each key per user, with a hash of the validated fields">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Key per user, with a request hash and the saved response</li>
+    <li>Same hash: replay the 201 and body, idempotency-replayed: true</li>
+    <li>Different hash: 422, key reused, never a wrong replay</li>
+    <li>Enrollment + saved response in one transaction</li>
+    <li>Several instances: key row first, in progress; 409 to a duplicate</li>
+  </ul>
+</section>
+
+<section id="q3" data-part="11" data-cue="Where does each status code end up in the UI of a form?" data-voice="interviewer">
+  <div class="kicker">Question 3 of 5</div>
+  <p class="question">Where does each status code end up in the UI of a form?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a3" data-part="11" data-cue="Validate on the client first, so a 400 is rare">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>400: rare; the problem's detail in the one alert</li>
+    <li>401: the interceptor; wrong password on sign-in</li>
+    <li>403: a message; don't offer the action</li>
+    <li>404 changes the page; 409 can be success; 422 is a bug</li>
+    <li>0 and 5xx: retry with backoff; show the trace ID</li>
+  </ul>
+</section>
+
+<section id="q4" data-part="11" data-cue="What does an ETag save compared with a max-age cache header, and what does each risk?" data-voice="interviewer">
+  <div class="kicker">Question 4 of 5</div>
+  <p class="question">What does an ETag save compared with max-age, and what does each risk?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a4" data-part="11" data-cue="An ETag with no-cache means the browser always asks">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>ETag + no-cache: a 304 saves bytes, not the round trip</li>
+    <li>Never stale</li>
+    <li>max-age: no request at all, but stale and unrecallable</li>
+    <li>Per-user: private either way</li>
+    <li>ETags for per-user state; short max-age for shared data</li>
+  </ul>
+</section>
+
+<section id="q5" data-part="11" data-cue="How would you detect contract drift between two teams' services?" data-voice="interviewer">
+  <div class="kicker">Question 5 of 5</div>
+  <p class="question">How would you detect contract drift between two teams' services?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a5" data-part="11" data-cue="Inside one repo, Coursewright does it with one hand-written OpenAPI file">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>One spec; generated types; contracts:check in CI</li>
+    <li>Requests validated against the spec's schemas</li>
+    <li>A contract test on every documented response</li>
+    <li>Between teams: Pact, verified by the provider; oasdiff</li>
+    <li>Production: validate sampled responses, alert</li>
+  </ul>
+</section>
+
+<!-- ───────────── Recap ───────────── -->
+<template id="recap">
+  <h2>Five things to remember</h2>
+  <ol class="recap">
+    <li class="item">Contract first: hand-written openapi.yaml, generated schema.d.ts, CI fails on drift.</li>
+    <li class="item">Hold both sides: generated types, validated requests, a contract test on every response.</li>
+    <li class="item">Status codes are UI decisions. One problem shape with a trace ID.</li>
+    <li class="item">ETags: bytes, never stale. max-age: requests, maybe stale. Idempotency lives on the server.</li>
+    <li class="item">Rename: expand, migrate, wait for old tabs, contract.</li>
+  </ol>
+</template>
+<section id="recap-0" data-part="12" data-cue="Five things to remember" data-template="recap" data-show="0"></section>
+<section id="recap-1" data-part="12" data-cue="One: the contract comes first" data-template="recap" data-show="1"></section>
+<section id="recap-2" data-part="12" data-cue="Two: hold both sides to it" data-template="recap" data-show="2"></section>
+<section id="recap-3" data-part="12" data-cue="Three: status codes are UI decisions" data-template="recap" data-show="3"></section>
+<section id="recap-4" data-part="12" data-cue="Four: ETags save bytes and are never stale" data-template="recap" data-show="4"></section>
+<section id="recap-5" data-part="12" data-cue="Five: rename with expand, migrate, contract" data-template="recap" data-show="5"></section>
+
+<section id="next" data-part="12" data-cue="In the next lesson">
+  <div class="kicker">Next</div>
+  <h1>08 · Browser Auth: Tokens and Refresh</h1>
+  <p class="lead">Where the access token lives, how the refresh cookie rotates, and why the interceptor refreshes once and retries once.</p>
+</section>
+
+<script src="../assets/slides.js"></script>
+</body>
+</html>

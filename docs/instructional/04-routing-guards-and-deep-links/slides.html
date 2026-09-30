@@ -1,0 +1,656 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 04 Slides</title>
+<!--
+  Slides for the lesson 04 video. Each <section> is one slide. data-cue is a phrase from script.md:
+  tools/instructional-video/build.cs shows the slide from the moment the narration reaches that phrase.
+  Open this file in a browser and use the arrow keys to step through the deck.
+-->
+<link rel="stylesheet" href="../assets/slides.css">
+</head>
+<body data-lesson-number="04" data-lesson-title="Routing, Guards and Deep Links" data-parts="Introduction|The questions|The route table|The guards|canMatch vs canActivate|Route inputs and titles|Deep links|Validating returnUrl|Preloading|Unsaved changes|Trade-offs|Traps|Interview drill|Recap">
+
+<!-- ───────────── Intro ───────────── -->
+<section id="title" data-part="0">
+  <div class="kicker">Coursewright frontend · Lesson 04</div>
+  <h1>Routing, Guards<br>and Deep Links</h1>
+  <p class="lead">Which guard runs when, what a failed guard costs, and how a bookmarked link survives a reload and a sign-in.</p>
+</section>
+
+<!-- ───────────── Questions ───────────── -->
+<section id="questions" data-part="1" data-cue="The questions this lesson answers">
+  <h2>The questions this lesson answers</h2>
+  <ul>
+    <li>canMatch, canActivate or a resolver: when, and at what cost?</li>
+    <li>Where would you put an "unsaved changes" check?</li>
+    <li>How do you keep deep links working behind authentication?</li>
+    <li>Lazy loading and preloading: when would you preload?</li>
+    <li>Why validate returnUrl? What's wrong with //evil.example?</li>
+  </ul>
+</section>
+
+<section id="thesis" data-part="1" data-cue="Keep one sentence in your head while you listen">
+  <div class="kicker">The thesis</div>
+  <p class="quote">Every URL is an <span class="accent">entry point</span>.</p>
+  <p class="muted" style="margin-top:48px">It has to survive a reload, a sign-in, and a hostile link.</p>
+</section>
+
+<!-- ───────────── The route table ───────────── -->
+<section id="routes-comment" data-part="2" data-cue="Open apps/web/src/app/app.routes.ts">
+  <h2>Two claims in one comment</h2>
+  <div class="file">apps/web/src/app/app.routes.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,2">// Every feature is lazy-loaded, so the initial bundle is just the shell, core and design system.
+// canMatch (not canActivate) also keeps a guarded feature's code from downloading at all.
+export const routes: Routes = [
+  { path: '', pathMatch: 'full', redirectTo: 'catalog' },
+  {
+    path: 'login',
+    title: 'Sign in',
+    loadComponent: () =&gt; import('./features/login/login-page').then((m) =&gt; m.LoginPage),
+  },
+  // …
+];</pre>
+  <p class="small amber">The second claim gets tested later in this lesson.</p>
+</section>
+
+<section id="routes-table" data-part="2" data-cue="The table itself is short">
+  <h2>The route table</h2>
+  <table>
+    <tr><th>Path</th><th>canMatch</th><th>Title</th></tr>
+    <tr><td>''</td><td>redirectTo 'catalog' (pathMatch 'full')</td><td></td></tr>
+    <tr><td>login</td><td>none</td><td>Sign in</td></tr>
+    <tr><td>catalog</td><td>authGuard</td><td>Catalog</td></tr>
+    <tr><td>courses/:courseId</td><td>authGuard</td><td>Course</td></tr>
+    <tr><td>reports</td><td>authGuard, roleGuard('manager')</td><td>Reports</td></tr>
+    <tr><td>**</td><td>none</td><td>Page not found</td></tr>
+  </table>
+  <div class="file" style="margin-top:36px">apps/web/src/app/app.routes.ts</div>
+</section>
+
+<section id="routes-lazy" data-part="2" data-cue="Every page has a title, and every page uses loadComponent">
+  <h2>Every page: a title and its own chunk</h2>
+  <div class="file">apps/web/src/app/app.routes.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="3,4,9">{
+  path: 'reports',
+  title: 'Reports',
+  canMatch: [authGuard, roleGuard('manager')],
+  loadComponent: () =&gt; import('./features/reports/reports-page').then((m) =&gt; m.ReportsPage),
+},
+{
+  path: '**',
+  title: 'Page not found',
+  loadComponent: () =&gt; import('./features/not-found/not-found-page').then((m) =&gt; m.NotFoundPage),
+},</pre>
+  <p class="small muted">A dynamic import per feature: fetched on first use. Lesson 06 measures the savings.</p>
+</section>
+
+<!-- ───────────── The guards ───────────── -->
+<section id="auth-guard" data-part="3" data-cue="Now core/auth/guards.ts">
+  <h2>The auth guard</h2>
+  <div class="file">apps/web/src/app/core/auth/guards.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="3,7,8">/** Signed-out users go to the login page, which sends them back here afterwards. */
+export const authGuard: CanMatchFn = () =&gt; {
+  if (inject(AuthStore).isAuthenticated()) {
+    return true;
+  }
+  const router = inject(Router);
+  const returnUrl = router.currentNavigation()?.extractedUrl.toString() ?? '/';
+  return router.createUrlTree(['/login'], { queryParams: { returnUrl } });
+};</pre>
+  <p class="small muted">isAuthenticated() is a signal (lesson 02), read once per navigation.</p>
+</section>
+
+<section id="redirect-flow" data-part="3" data-cue="If you're not, it doesn't navigate">
+  <h2>Signed out: a URL tree, not a navigation</h2>
+  <svg width="1640" height="300" viewBox="0 0 1640 300">
+    <defs><marker id="arrow-g" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="0" y="40" width="370" height="150" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="185" y="100" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">/catalog?q=forms</text>
+    <text x="185" y="140" fill="#8ea2c0" font-size="22" text-anchor="middle">opened signed out</text>
+    <line x1="375" y1="115" x2="418" y2="115" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-g)"/>
+    <rect x="430" y="40" width="370" height="150" rx="18" fill="#0f2233" stroke="#38bdf8" stroke-width="3"/>
+    <text x="615" y="100" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">authGuard</text>
+    <text x="615" y="140" fill="#38bdf8" font-size="22" text-anchor="middle">returns a UrlTree</text>
+    <line x1="805" y1="115" x2="848" y2="115" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-g)"/>
+    <rect x="860" y="40" width="370" height="150" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="1045" y="100" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">/login</text>
+    <text x="1045" y="140" fill="#8ea2c0" font-size="22" text-anchor="middle">returnUrl = /catalog?q=forms</text>
+    <line x1="1235" y1="115" x2="1278" y2="115" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-g)"/>
+    <rect x="1290" y="40" width="350" height="150" rx="18" fill="#121b2f" stroke="#1f5f7f" stroke-width="3"/>
+    <text x="1465" y="100" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">sign in</text>
+    <text x="1465" y="140" fill="#8ea2c0" font-size="22" text-anchor="middle">back to /catalog?q=forms</text>
+    <text x="615" y="250" fill="#8ea2c0" font-size="24" text-anchor="middle">URL from router.currentNavigation(), query string included</text>
+  </svg>
+  <p class="small amber">currentNavigation is a signal in Angular 22 (older: getCurrentNavigation()). As of September 2026; check your version.</p>
+</section>
+
+<section id="urltree" data-part="3" data-cue="Why return a URL tree instead of calling navigate and returning false?">
+  <h2>Return a UrlTree; don't navigate</h2>
+  <div class="file">Sketch · not in this repo · the pattern to avoid</div>
+  <pre class="code tight" data-lang="ts" data-mark="3">export const authGuard: CanMatchFn = () =&gt; {
+  if (inject(AuthStore).isAuthenticated()) return true;
+  void inject(Router).navigate(['/login']);   // a second navigation, racing the first
+  return false;
+};</pre>
+  <div class="cols">
+    <div class="card legacy"><h3 class="amber">navigate + false</h3><p>Two navigations. The outcome depends on timing.</p></div>
+    <div class="card modern"><h3>return a UrlTree</h3><p>The router cancels this navigation and runs the redirect itself.</p></div>
+  </div>
+</section>
+
+<section id="role-guard" data-part="3" data-cue="The role guard is a factory">
+  <h2>The role guard: fall through, don't leak</h2>
+  <div class="file">apps/web/src/app/core/auth/guards.ts · excerpt</div>
+  <pre class="code" data-lang="ts" data-mark="2,3,4,7">/**
+ * canMatch, not canActivate: when it fails, the router falls through to the `**` route, so
+ * a learner sees "Page not found" and the page's existence doesn't leak. The BFF does the
+ * same with cross-tenant resources (404, not 403). The BFF still enforces the role itself.
+ */
+export function roleGuard(role: Role): CanMatchFn {
+  return () =&gt; inject(AuthStore).hasRole(role);
+}</pre>
+</section>
+
+<section id="guards-ux" data-part="3" data-cue="And the comment ends with the line that matters most">
+  <div class="kicker">The line that matters most</div>
+  <p class="quote">The BFF still enforces the role itself.</p>
+  <p class="muted" style="margin-top:48px">Guards are user experience. Authorization happens on the server: lesson 08.</p>
+</section>
+
+<!-- ───────────── canMatch vs canActivate ───────────── -->
+<section id="pipeline" data-part="4" data-cue="So here's the core question">
+  <h2>Where each one runs in a navigation</h2>
+  <svg width="1640" height="400" viewBox="0 0 1640 400">
+    <defs><marker id="arrow-p" markerUnits="userSpaceOnUse" markerWidth="20" markerHeight="20" refX="17" refY="9" orient="auto"><path d="M0,0 L18,9 L0,18 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="0" y="20" width="280" height="150" rx="18" fill="#0f2233" stroke="#38bdf8" stroke-width="3"/>
+    <text x="140" y="72" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">1 · Match</text>
+    <text x="140" y="110" fill="#38bdf8" font-size="22" text-anchor="middle">canMatch</text>
+    <text x="140" y="142" fill="#8ea2c0" font-size="20" text-anchor="middle">loadChildren fetched</text>
+    <line x1="286" y1="95" x2="334" y2="95" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-p)"/>
+    <rect x="340" y="20" width="280" height="150" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="480" y="72" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">2 · Guards</text>
+    <text x="480" y="110" fill="#8ea2c0" font-size="22" text-anchor="middle">canActivate</text>
+    <text x="480" y="142" fill="#8ea2c0" font-size="20" text-anchor="middle">canDeactivate</text>
+    <line x1="626" y1="95" x2="674" y2="95" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-p)"/>
+    <rect x="680" y="20" width="280" height="150" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="820" y="72" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">3 · Resolve</text>
+    <text x="820" y="110" fill="#8ea2c0" font-size="22" text-anchor="middle">resolvers</text>
+    <text x="820" y="142" fill="#8ea2c0" font-size="20" text-anchor="middle">navigation waits</text>
+    <line x1="966" y1="95" x2="1014" y2="95" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-p)"/>
+    <rect x="1020" y="20" width="280" height="150" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="1160" y="72" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">4 · Load</text>
+    <text x="1160" y="110" fill="#8ea2c0" font-size="22" text-anchor="middle">loadComponent</text>
+    <text x="1160" y="142" fill="#8ea2c0" font-size="20" text-anchor="middle">fetched now</text>
+    <line x1="1306" y1="95" x2="1354" y2="95" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-p)"/>
+    <rect x="1360" y="20" width="280" height="150" rx="18" fill="#121b2f" stroke="#1f5f7f" stroke-width="3"/>
+    <text x="1500" y="72" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">5 · Activate</text>
+    <text x="1500" y="110" fill="#8ea2c0" font-size="22" text-anchor="middle">render, title</text>
+    <text x="1500" y="142" fill="#8ea2c0" font-size="20" text-anchor="middle">route focus</text>
+    <text x="140" y="230" fill="#38bdf8" font-size="22" text-anchor="middle">false: try the next route</text>
+    <text x="140" y="262" fill="#38bdf8" font-size="22" text-anchor="middle">UrlTree: redirect</text>
+    <text x="480" y="230" fill="#f5b544" font-size="22" text-anchor="middle">false: cancel</text>
+    <text x="480" y="262" fill="#f5b544" font-size="22" text-anchor="middle">UrlTree: redirect</text>
+    <text x="820" y="230" fill="#f5b544" font-size="22" text-anchor="middle">error: navigation fails</text>
+    <text x="820" y="340" fill="#8ea2c0" font-size="24" text-anchor="middle">The installed Angular 22 router, as of September 2026</text>
+  </svg>
+</section>
+
+<template id="guard-kinds">
+  <h2>When each runs, and what it costs</h2>
+  <div class="cols3">
+    <div class="card item"><h3>canMatch</h3><p>During matching, every navigation. False: next route. Must be cheap.</p></div>
+    <div class="card item"><h3>canActivate</h3><p>After matching. False cancels; no fall-through. Re-runs when params change.</p></div>
+    <div class="card item"><h3>Resolver</h3><p>After guards. The navigation waits for data; an error fails it.</p></div>
+  </div>
+</template>
+<section id="kinds-1" data-part="4" data-cue="canMatch runs during matching" data-template="guard-kinds" data-highlight="1"></section>
+<section id="kinds-2" data-part="4" data-cue="canActivate runs after a route has matched" data-template="guard-kinds" data-highlight="2"></section>
+<section id="kinds-3" data-part="4" data-cue="A resolver runs after the guards, and the navigation waits" data-template="guard-kinds" data-highlight="3"></section>
+
+<section id="downloads" data-part="4" data-cue="Now test the comment's claim about downloads">
+  <h2>Testing the download claim</h2>
+  <table>
+    <tr><th>Guard fails on…</th><th>a loadComponent route</th><th>a loadChildren route</th></tr>
+    <tr><td>canMatch</td><td>not fetched</td><td>not fetched</td></tr>
+    <tr><td>canActivate</td><td>not fetched: components load after guards</td><td>child routes fetched while matching</td></tr>
+  </table>
+  <ul class="small" style="margin-top:36px">
+    <li>The stronger reasons here: the fall-through, and two routes sharing one path</li>
+  </ul>
+  <p class="small amber">The installed Angular 22 router, as of September 2026. Check this for your version.</p>
+</section>
+
+<!-- ───────────── Route inputs and titles ───────────── -->
+<section id="input-binding" data-part="5" data-cue="Next, app.config.ts">
+  <h2>Route data arrives as inputs</h2>
+  <div class="file">apps/web/src/app/app.config.ts · excerpt</div>
+  <pre class="code" data-lang="ts" data-mark="1,2">// withComponentInputBinding: route params, query params and data arrive as component inputs.
+provideRouter(routes, withComponentInputBinding()),
+{ provide: TitleStrategy, useClass: PageTitleStrategy },</pre>
+</section>
+
+<section id="inputs-pages" data-part="5" data-cue="You've seen three of them">
+  <h2>Three pages, no ActivatedRoute reads</h2>
+  <div class="file">apps/web/src/app/features/course/course-page.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2">/** Bound from the `:courseId` route parameter (withComponentInputBinding). */
+readonly courseId = input.required&lt;string&gt;();</pre>
+  <div class="file">apps/web/src/app/features/login/login-page.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2">/** Bound from the `?returnUrl=` query parameter (withComponentInputBinding). */
+readonly returnUrl = input&lt;string&gt;();</pre>
+  <div class="file">apps/web/src/app/features/catalog/catalog-page.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2">/** Bound from `?q=`, so a search can be bookmarked, shared, and restored by Back. */
+readonly q = input&lt;string&gt;();</pre>
+  <p class="small muted">Signals, so everything derives from them. The login spec calls setInput('returnUrl', …).</p>
+</section>
+
+<section id="inputs-caveats" data-part="5" data-cue="Two details are worth knowing">
+  <h2>Two details worth knowing</h2>
+  <div class="cols">
+    <div class="card">
+      <h3>Name collisions</h3>
+      <p>Route data wins over path params, which win over query params.</p>
+    </div>
+    <div class="card legacy">
+      <h3 class="amber">It's user input</h3>
+      <p>Any query parameter can set a same-named input. returnUrl is the example.</p>
+    </div>
+  </div>
+  <p class="small muted" style="margin-top:36px">An absent parameter sets its input to undefined (the default behaviour).</p>
+</section>
+
+<section id="title-strategy" data-part="5" data-cue="Titles come from shell/title-strategy.ts">
+  <h2>Every page has a title</h2>
+  <div class="file">apps/web/src/app/shell/title-strategy.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,8">/** Each route's `title` becomes "&lt;title&gt; · Coursewright", the first thing a screen reader reads. */
+@Injectable({ providedIn: 'root' })
+export class PageTitleStrategy extends TitleStrategy {
+  private readonly title = inject(Title);
+
+  override updateTitle(snapshot: RouterStateSnapshot): void {
+    const page = this.buildTitle(snapshot);
+    this.title.setTitle(page ? `${page} · Coursewright` : 'Coursewright');
+  }
+}</pre>
+  <p class="small muted">The course page upgrades "Course" to the course's name with an effect (lesson 02).</p>
+</section>
+
+<section id="route-focus" data-part="5" data-cue="Next door, shell/route-focus.ts moves focus">
+  <h2>Route focus: taught in lesson 05</h2>
+  <div class="file">apps/web/src/app/shell/route-focus.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="4,5,6,7">router.events
+  .pipe(
+    filter((event) =&gt; event instanceof NavigationEnd),
+    // Only a new path counts: query-only changes (the catalog's ?q=) must not steal focus
+    // from the search box while the user types.
+    map((event) =&gt; event.urlAfterRedirects.split(/[?#]/)[0]),
+    distinctUntilChanged(),
+    // On the initial load the screen reader already reads the new document from the top.
+    skip(1),
+    takeUntilDestroyed(),
+  )</pre>
+  <p class="small muted">Then: focus the page's h1 and announce "&lt;title&gt; page loaded".</p>
+</section>
+
+<!-- ───────────── Deep links ───────────── -->
+<template id="deep">
+  <h2>Deep links behind authentication</h2>
+  <div class="steps" style="grid-template-columns:1fr">
+    <div class="step item"><span class="num">1</span>The host serves the app for any path</div>
+    <div class="step item"><span class="num">2</span>The session is restored before the first navigation</div>
+    <div class="step item"><span class="num">3</span>The full address survives the sign-in, validated</div>
+  </div>
+</template>
+<section id="deep-0" data-part="6" data-cue="Now the deep-link question" data-template="deep"></section>
+<section id="deep-1" data-part="6" data-cue="First, the server must serve the app for any path" data-template="deep" data-highlight="1"></section>
+
+<section id="host-fallback" data-part="6" data-cue="A static host has to answer with the app's index page">
+  <h2>1 · The host's fallback rule</h2>
+  <div class="cols">
+    <div class="card legacy">
+      <h3 class="amber">No fallback</h3>
+      <p class="small" style="font-family:'Cascadia Mono',Consolas,monospace">GET /courses/c1 → 404</p>
+      <p>Works until someone presses reload.</p>
+    </div>
+    <div class="card modern">
+      <h3>Fallback to index.html</h3>
+      <p class="small" style="font-family:'Cascadia Mono',Consolas,monospace">GET /courses/c1 → index.html</p>
+      <p>The router takes it from there.</p>
+    </div>
+  </div>
+  <p class="small muted" style="margin-top:36px">The Angular dev server does this for you. In production: a host or CDN rewrite rule (not in this repo).</p>
+</section>
+
+<section id="deep-2" data-part="6" data-cue="Second, the session must be known before the first navigation" data-template="deep" data-highlight="2"></section>
+
+<section id="initializer" data-part="6" data-cue="Look at app.config.ts again">
+  <h2>2 · Restore the session first</h2>
+  <div class="file">apps/web/src/app/app.config.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,2">// Runs before the first navigation, so guards already know whether the user is signed in.
+provideAppInitializer(() =&gt; inject(AuthStore).restore()),</pre>
+  <div class="file">apps/web/src/app/core/auth/auth.store.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1">/** Startup: a valid refresh cookie silently restores the session; a 401 just means signed out. */
+restore(): Observable&lt;unknown&gt; {
+  return this.refresh().pipe(catchError(() =&gt; of(null)));
+}</pre>
+  <p class="small muted">The access token lives only in memory; the HttpOnly refresh cookie survives the reload. Lesson 08.</p>
+</section>
+
+<section id="reload" data-part="6" data-cue="Without the initializer, the auth guard would see">
+  <h2>A reload on /courses/c1</h2>
+  <svg width="1640" height="440" viewBox="0 0 1640 440">
+    <defs><marker id="arrow-d" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <text x="0" y="30" fill="#38bdf8" font-size="28" font-weight="600">With the app initializer (Coursewright)</text>
+    <rect x="0" y="55" width="380" height="120" rx="16" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="190" y="105" fill="#e8eef8" font-size="26" text-anchor="middle">restore()</text>
+    <text x="190" y="142" fill="#8ea2c0" font-size="21" text-anchor="middle">refresh with the cookie</text>
+    <line x1="385" y1="115" x2="438" y2="115" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-d)"/>
+    <rect x="450" y="55" width="380" height="120" rx="16" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="640" y="105" fill="#e8eef8" font-size="26" text-anchor="middle">first navigation</text>
+    <text x="640" y="142" fill="#8ea2c0" font-size="21" text-anchor="middle">authGuard: signed in</text>
+    <line x1="835" y1="115" x2="888" y2="115" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-d)"/>
+    <rect x="900" y="55" width="740" height="120" rx="16" fill="#0f2233" stroke="#38bdf8" stroke-width="3"/>
+    <text x="1270" y="105" fill="#e8eef8" font-size="26" text-anchor="middle">the course page</text>
+    <text x="1270" y="142" fill="#38bdf8" font-size="21" text-anchor="middle">the deep link works</text>
+    <text x="0" y="265" fill="#f5b544" font-size="28" font-weight="600">Without it</text>
+    <rect x="0" y="290" width="830" height="120" rx="16" fill="#121b2f" stroke="#6b5220" stroke-width="3"/>
+    <text x="415" y="340" fill="#e8eef8" font-size="26" text-anchor="middle">first navigation</text>
+    <text x="415" y="377" fill="#8ea2c0" font-size="21" text-anchor="middle">authGuard: the store is empty, so "signed out"</text>
+    <line x1="835" y1="350" x2="888" y2="350" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-d)"/>
+    <rect x="900" y="290" width="740" height="120" rx="16" fill="#121b2f" stroke="#f5b544" stroke-width="3"/>
+    <text x="1270" y="340" fill="#e8eef8" font-size="26" text-anchor="middle">/login</text>
+    <text x="1270" y="377" fill="#f5b544" font-size="21" text-anchor="middle">a signed-in learner, bounced</text>
+  </svg>
+  <p class="small muted">The cost: one round trip before the app renders. Production often adds a splash in index.html.</p>
+</section>
+
+<section id="deep-3" data-part="6" data-cue="Third, the address must survive the sign-in">
+  <h2>3 · Back to the exact address</h2>
+  <div class="file">apps/web/src/app/features/login/login-page.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2">this.auth.login(this.form.getRawValue()).subscribe({
+  next: () =&gt; void this.router.navigateByUrl(safeReturnUrl(this.returnUrl())),</pre>
+  <div class="file">apps/web/e2e/learner-journey.spec.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="4,8">test('opening a protected page signed out goes to sign-in, then back to that page', async ({
+  page,
+}) =&gt; {
+  await page.goto('/catalog?q=forms');
+  await expect(page.getByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
+  // …
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page).toHaveURL(/\/catalog\?q=forms/);</pre>
+</section>
+
+<!-- ───────────── Validating returnUrl ───────────── -->
+<section id="return-url" data-part="7" data-cue="Open features/login/return-url.ts">
+  <h2>safeReturnUrl</h2>
+  <div class="file">apps/web/src/app/features/login/return-url.ts</div>
+  <pre class="code tight" data-lang="ts" data-mark="9,10">const DEFAULT_URL = '/catalog';
+
+/**
+ * Only a path inside this app. Without the check, a crafted link such as
+ * `/login?returnUrl=https://evil.example` would turn a real sign-in into a phishing redirect.
+ * `//evil.example` and `/\evil.example` are protocol-relative URLs to another host, too.
+ */
+export function safeReturnUrl(url: string | null | undefined): string {
+  if (!url || !url.startsWith('/') || url.startsWith('//') || url.startsWith('/\\')) {
+    return DEFAULT_URL;
+  }
+  return url;
+}</pre>
+</section>
+
+<section id="threat" data-part="7" data-cue="The comment gives the threat">
+  <h2>The phishing redirect</h2>
+  <div class="steps" style="grid-template-columns:1fr">
+    <div class="step"><span class="num">1</span>A crafted link: /login?returnUrl=//evil.example</div>
+    <div class="step"><span class="num">2</span>The real domain, a real sign-in page, a real password</div>
+    <div class="step on"><span class="num">3</span>Redirected to a lookalike: "Session expired, please sign in again"</div>
+  </div>
+</section>
+
+<section id="protocol-relative" data-part="7" data-cue="is a protocol-relative URL">
+  <h2>What a browser does with each value</h2>
+  <table>
+    <tr><th>returnUrl</th><th>Resolved against https://app.example</th><th>safeReturnUrl</th></tr>
+    <tr><td>/courses/c1?tab=lessons</td><td>same site</td><td class="green">kept</td></tr>
+    <tr><td>//evil.example</td><td>https://evil.example (protocol-relative)</td><td class="amber">/catalog</td></tr>
+    <tr><td>/\evil.example</td><td>https://evil.example (\ treated as /)</td><td class="amber">/catalog</td></tr>
+    <tr><td>https://evil.example/login</td><td>another site</td><td class="amber">/catalog</td></tr>
+  </table>
+</section>
+
+<section id="router-parse" data-part="7" data-cue="Be precise here, because it's the kind of detail">
+  <h2>Be precise: the router stays in the app</h2>
+  <table>
+    <tr><th>String</th><th>Angular's URL parser (installed 22.2) gives</th></tr>
+    <tr><td>//evil.example</td><td>/evil.example: an in-app path</td></tr>
+    <tr><td>/\evil.example</td><td>/%5Cevil.example</td></tr>
+    <tr><td>https://evil.example</td><td>/https:</td></tr>
+  </table>
+  <div class="cols" style="margin-top:36px">
+    <div class="card"><h3>So why check?</h3><p>Return URLs rarely stay in the router.</p></div>
+    <div class="card legacy"><h3 class="amber">They reach</h3><p>An identity provider, window.location, a server redirect.</p></div>
+  </div>
+</section>
+
+<section id="return-spec" data-part="7" data-cue="covers both halves">
+  <h2>Both halves, tested</h2>
+  <div class="file">apps/web/src/app/features/login/login-page.spec.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="3,6,8">describe('safeReturnUrl', () =&gt; {
+  it('keeps paths inside the app', () =&gt; {
+    expect(safeReturnUrl('/courses/c1?tab=lessons')).toBe('/courses/c1?tab=lessons');
+  });
+
+  it.each(['//evil.example', '/\\evil.example', 'https://evil.example/login', 'catalog', '', null])(
+    'rejects %j (open-redirect guard)',
+    (url) =&gt; expect(safeReturnUrl(url)).toBe('/catalog'),
+  );
+});
+// …
+it('ignores an off-site returnUrl after signing in', async () =&gt; {
+  const { element, http, navigate } = await render('https://evil.example');
+  // …
+  expect(navigate).toHaveBeenCalledWith('/catalog');</pre>
+</section>
+
+<!-- ───────────── Preloading ───────────── -->
+<section id="lazy" data-part="8" data-cue="Every feature is lazy, and no preloading strategy is configured">
+  <h2>Lazy, and not preloaded</h2>
+  <div class="file">apps/web/src/app/app.config.ts · excerpt</div>
+  <pre class="code" data-lang="ts">provideRouter(routes, withComponentInputBinding()),</pre>
+  <p>No <span class="accent">withPreloading(…)</span>: each feature downloads on its first visit.</p>
+</section>
+
+<section id="preload-options" data-part="8" data-cue="You can change that">
+  <h2>Preloading, deliberately</h2>
+  <div class="file">Sketch · not in this repo · preload only flagged routes</div>
+  <pre class="code tight" data-lang="ts" data-mark="4">@Injectable({ providedIn: 'root' })
+export class FlaggedPreloading implements PreloadingStrategy {
+  preload(route: Route, load: () =&gt; Observable&lt;unknown&gt;): Observable&lt;unknown&gt; {
+    return route.data?.['preload'] ? load() : of(null);
+  }
+}
+// provideRouter(routes, withComponentInputBinding(), withPreloading(FlaggedPreloading))</pre>
+  <ul class="small">
+    <li>PreloadAllModules: every lazy route, after the first navigation</li>
+    <li>Preload the next likely page, once the first is interactive; let analytics decide</li>
+  </ul>
+</section>
+
+<section id="preload-canmatch" data-part="8" data-cue="The preloader doesn't run can-match guards">
+  <h2>The preloader ignores canMatch</h2>
+  <div class="cols">
+    <div class="card legacy"><h3 class="amber">PreloadAllModules</h3><p>A learner's browser downloads the reports chunk too.</p></div>
+    <div class="card modern"><h3>Not a security hole</h3><p>Code isn't secret; the server enforces the role. It just wastes bandwidth.</p></div>
+  </div>
+  <p class="small amber" style="margin-top:36px">The installed Angular 22 router, as of September 2026. Check this for your version.</p>
+</section>
+
+<!-- ───────────── Unsaved changes ───────────── -->
+<section id="unsaved" data-part="9" data-cue="In a can-deactivate guard on the route">
+  <h2>"You have unsaved changes"</h2>
+  <div class="file">Sketch · not in this repo · a CanDeactivate guard</div>
+  <pre class="code tight" data-lang="ts" data-mark="5,6">export interface HasUnsavedChanges {
+  hasUnsavedChanges(): boolean;
+}
+
+export const unsavedChangesGuard: CanDeactivateFn&lt;HasUnsavedChanges&gt; = (page) =&gt;
+  !page.hasUnsavedChanges() || inject(ConfirmDialog).ask('Discard your changes?');
+
+// { path: 'courses/:courseId/edit', canDeactivate: [unsavedChangesGuard], loadComponent: … }</pre>
+  <p class="small muted">ConfirmDialog is hypothetical: an accessible dialog whose ask() returns Observable&lt;boolean&gt;.</p>
+</section>
+
+<section id="unsaved-limits" data-part="9" data-cue="It doesn't cover a reload, closing the tab">
+  <h2>What each mechanism covers</h2>
+  <div class="cols">
+    <div class="card modern">
+      <h3>CanDeactivate</h3>
+      <ul><li>Router navigations away</li><li>The Back button</li><li>Your own accessible dialog</li></ul>
+    </div>
+    <div class="card legacy">
+      <h3 class="amber">beforeunload</h3>
+      <ul><li>Reload, close the tab, a typed address</li><li>Only the browser's generic prompt</li></ul>
+    </div>
+  </div>
+  <p class="muted" style="margin-top:36px">Autosaved drafts make the question rare.</p>
+</section>
+
+<!-- ───────────── Trade-offs ───────────── -->
+<section id="tradeoffs" data-part="10" data-cue="The app initializer trades a round trip at startup">
+  <h2>Trade-offs, and what production would add</h2>
+  <ul>
+    <li>A startup round trip, for a guard that's never wrong about the session</li>
+    <li>Guards are UX; the server stays the authority</li>
+    <li>CanDeactivate guards for dirty forms</li>
+    <li>A preloading strategy tuned by analytics; route-level error boundaries</li>
+    <li>The host's fallback rule for deep links</li>
+  </ul>
+</section>
+
+<!-- ───────────── Traps ───────────── -->
+<section id="traps" data-part="11" data-cue="Can activate where you wanted a fall-through">
+  <h2>Traps</h2>
+  <ul class="small">
+    <li>canActivate where you wanted a fall-through</li>
+    <li>A guard that navigates and returns false</li>
+    <li>A guard treated as authorization</li>
+    <li>An unvalidated returnUrl</li>
+    <li>The session restored after the first navigation</li>
+    <li>No fallback rule on the host</li>
+    <li>An expensive canMatch: it runs on every navigation</li>
+  </ul>
+</section>
+
+<!-- ───────────── Interview drill ───────────── -->
+<section id="drill" data-part="12" data-cue="Let's practise">
+  <div class="kicker">Interview drill</div>
+  <h1>Five questions</h1>
+  <p class="lead">After each question, pause and answer out loud. Then compare with the model answer.</p>
+</section>
+
+<section id="q1" data-part="12" data-cue="canMatch, canActivate or a resolver: when does each run, and what does each cost?" data-voice="interviewer">
+  <div class="kicker">Question 1 of 5</div>
+  <p class="question">canMatch, canActivate or a resolver: when does each run, and what does each cost?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a1" data-part="12" data-cue="Can match runs during matching, on every navigation">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>canMatch: during matching; false tries the next route</li>
+    <li>roleGuard: a learner gets "Page not found", no leak</li>
+    <li>canActivate: after matching; false cancels</li>
+    <li>Resolver: the navigation waits for data</li>
+    <li>Coursewright: canMatch, and a resource in the page</li>
+  </ul>
+</section>
+
+<section id="q2" data-part="12" data-cue="Where would you put a &quot;you have unsaved changes&quot; check?" data-voice="interviewer">
+  <div class="kicker">Question 2 of 5</div>
+  <p class="question">Where would you put a "you have unsaved changes" check?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a2" data-part="12" data-cue="In a can-deactivate guard on the route, with the component exposing">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>A CanDeactivate guard; the page exposes its dirty state</li>
+    <li>Covers router navigations, including Back</li>
+    <li>beforeunload for reload, close and typed URLs</li>
+    <li>An accessible dialog; autosave drafts</li>
+  </ul>
+</section>
+
+<section id="q3" data-part="12" data-cue="How do you keep deep links working behind authentication?" data-voice="interviewer">
+  <div class="kicker">Question 3 of 5</div>
+  <p class="question">How do you keep deep links working behind authentication?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a3" data-part="12" data-cue="Three things. The host serves the index page for any app path">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>The host serves index.html for any app path</li>
+    <li>An app initializer restores the session first</li>
+    <li>The guard's UrlTree carries the full returnUrl</li>
+    <li>Validated, then navigated to after sign-in; an E2E test proves it</li>
+  </ul>
+</section>
+
+<section id="q4" data-part="12" data-cue="How does lazy loading interact with preloading, and when would you preload?" data-voice="interviewer">
+  <div class="kicker">Question 4 of 5</div>
+  <p class="question">How does lazy loading interact with preloading, and when would you preload?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a4" data-part="12" data-cue="Each Coursewright feature is a lazy chunk">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Lazy chunks, no preloading: download on first visit</li>
+    <li>PreloadAllModules, or a custom strategy for flagged routes</li>
+    <li>Preload the next likely page, after interactivity</li>
+    <li>The preloader ignores canMatch: bandwidth, not security</li>
+  </ul>
+</section>
+
+<section id="q5" data-part="12" data-cue="Why must returnUrl be validated, and what's wrong with //evil.example?" data-voice="interviewer">
+  <div class="kicker">Question 5 of 5</div>
+  <p class="question">Why must returnUrl be validated, and what's wrong with //evil.example?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a5" data-part="12" data-cue="Because it's user input on a trusted page">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>User input on a trusted page: a phishing redirect</li>
+    <li>// is protocol-relative; /\ is the same trick</li>
+    <li>Accept single-slash paths only; default to /catalog</li>
+    <li>The router stays in-app, but return URLs reach location and servers</li>
+  </ul>
+</section>
+
+<!-- ───────────── Recap ───────────── -->
+<template id="recap">
+  <h2>Five things to remember</h2>
+  <ol class="recap">
+    <li class="item">Lazy features, a title on every page, a wildcard for the rest.</li>
+    <li class="item">canMatch falls through; canActivate cancels; resolvers wait. Guards are UX.</li>
+    <li class="item">Route params arrive as signal inputs; treat them as user input.</li>
+    <li class="item">Deep links: host fallback, session first, full returnUrl.</li>
+    <li class="item">Validate returnUrl; preload deliberately.</li>
+  </ol>
+</template>
+<section id="recap-0" data-part="13" data-cue="Five things to remember" data-template="recap" data-show="0"></section>
+<section id="recap-1" data-part="13" data-cue="One: every feature is lazy-loaded, every route has a title" data-template="recap" data-show="1"></section>
+<section id="recap-2" data-part="13" data-cue="Two: can match runs during matching and can fall through" data-template="recap" data-show="2"></section>
+<section id="recap-3" data-part="13" data-cue="Three: route parameters and query parameters arrive as signal inputs" data-template="recap" data-show="3"></section>
+<section id="recap-4" data-part="13" data-cue="Four: deep links need a host fallback" data-template="recap" data-show="4"></section>
+<section id="recap-5" data-part="13" data-cue="Five: validate the return URL to single-slash, in-app paths" data-template="recap" data-show="5"></section>
+
+<section id="next" data-part="13" data-cue="In the next lesson">
+  <div class="kicker">Next</div>
+  <h1>05 · Accessibility in a Single-Page App</h1>
+  <p class="lead">The skip link, moving focus and announcing each new page, and why a busy button isn't a disabled one.</p>
+</section>
+
+<script src="../assets/slides.js"></script>
+</body>
+</html>

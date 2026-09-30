@@ -1,0 +1,816 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 11 Slides</title>
+<!--
+  Slides for the lesson 11 video. Each <section> is one slide. data-cue is a phrase from script.md:
+  tools/instructional-video/build.cs shows the slide from the moment the narration reaches that phrase.
+  Open this file in a browser and use the arrow keys to step through the deck.
+-->
+<link rel="stylesheet" href="../assets/slides.css">
+</head>
+<body data-lesson-number="11" data-lesson-title="CI/CD and Frontend Observability" data-parts="Introduction|The questions|The pipeline|Reproducible and debuggable|To production|One trace ID|Real-user monitoring|Error to request|Alerting|Production would add|Traps|Interview drill|Recap">
+
+<!-- ───────────── Intro ───────────── -->
+<section id="title" data-part="0">
+  <div class="kicker">Coursewright frontend · Lesson 11</div>
+  <h1>CI/CD and<br>Frontend Observability</h1>
+  <p class="lead">A pipeline that fails fast, releases you can reverse, and one trace ID from the browser to the log line.</p>
+</section>
+
+<!-- ───────────── Questions ───────────── -->
+<section id="questions" data-part="1" data-cue="The questions this lesson answers">
+  <h2>The questions this lesson answers</h2>
+  <ul>
+    <li>How do you connect a frontend error to the backend request that caused it?</li>
+    <li>CI takes 25 minutes. How do you get it under 10?</li>
+    <li>How do you ship a risky change to 5% of tenants first?</li>
+    <li>A deploy raised INP p75 by 80 ms. How would you have caught it?</li>
+    <li>"The catalog is slow since Tuesday." Walk through it.</li>
+  </ul>
+</section>
+
+<section id="thesis" data-part="1" data-cue="Keep one sentence in your head while you listen">
+  <div class="kicker">The thesis</div>
+  <p class="quote">Every release should be <span class="accent">reversible</span>, and every error should be <span class="accent">traceable</span>.</p>
+  <div class="cols" style="margin-top:56px">
+    <div class="card"><h3>Reversible</h3><p>The pipeline and the rollout.</p></div>
+    <div class="card"><h3>Traceable</h3><p>One trace ID, browser to log line.</p></div>
+  </div>
+</section>
+
+<!-- ───────────── The pipeline ───────────── -->
+<section id="ci-top" data-part="2" data-cue="Open .github/workflows/ci.yml">
+  <h2>When it runs, and with what rights</h2>
+  <div class="file">.github/workflows/ci.yml</div>
+  <pre class="code" data-lang="yaml" data-mark="7,10,11">on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true</pre>
+  <p class="small muted">Least privilege for the token. A newer commit cancels the stale run.</p>
+</section>
+
+<section id="pipeline" data-part="2" data-cue="Then there are two jobs">
+  <h2>Two jobs, cheapest checks first</h2>
+  <svg width="1640" height="470" viewBox="0 0 1640 470">
+    <defs><marker id="arrow-p" markerUnits="userSpaceOnUse" markerWidth="22" markerHeight="22" refX="20" refY="11" orient="auto"><path d="M0,0 L22,11 L0,22 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="0" y="0" width="1640" height="200" rx="18" fill="#121b2f" stroke="#38bdf8" stroke-width="3"/>
+    <text x="30" y="42" fill="#e8eef8" font-size="28" font-weight="600">verify</text>
+    <text x="140" y="42" fill="#8ea2c0" font-size="24">Contract, lint, test, build · ubuntu-latest · 15 min timeout</text>
+    <rect x="30" y="70" width="235" height="100" rx="12" fill="#0f2233" stroke="#1f5f7f"/>
+    <text x="147" y="112" fill="#e8eef8" font-size="26" text-anchor="middle">install</text>
+    <text x="147" y="146" fill="#8ea2c0" font-size="20" text-anchor="middle">--frozen-lockfile</text>
+    <rect x="295" y="70" width="235" height="100" rx="12" fill="#0f2233" stroke="#1f5f7f"/>
+    <text x="412" y="112" fill="#e8eef8" font-size="26" text-anchor="middle">contracts:check</text>
+    <text x="412" y="146" fill="#8ea2c0" font-size="20" text-anchor="middle">seconds</text>
+    <rect x="560" y="70" width="235" height="100" rx="12" fill="#0f2233" stroke="#1f5f7f"/>
+    <text x="677" y="112" fill="#e8eef8" font-size="26" text-anchor="middle">lint</text>
+    <text x="677" y="146" fill="#8ea2c0" font-size="20" text-anchor="middle">incl. boundaries</text>
+    <rect x="825" y="70" width="235" height="100" rx="12" fill="#0f2233" stroke="#1f5f7f"/>
+    <text x="942" y="112" fill="#e8eef8" font-size="26" text-anchor="middle">test</text>
+    <text x="942" y="146" fill="#8ea2c0" font-size="20" text-anchor="middle">BFF + web + contract</text>
+    <rect x="1090" y="70" width="235" height="100" rx="12" fill="#0f2233" stroke="#1f5f7f"/>
+    <text x="1207" y="112" fill="#e8eef8" font-size="26" text-anchor="middle">build</text>
+    <text x="1207" y="146" fill="#8ea2c0" font-size="20" text-anchor="middle">fails on budgets</text>
+    <rect x="1355" y="70" width="255" height="100" rx="12" fill="#121b2f" stroke="#22304d"/>
+    <text x="1482" y="112" fill="#e8eef8" font-size="26" text-anchor="middle">upload</text>
+    <text x="1482" y="146" fill="#8ea2c0" font-size="20" text-anchor="middle">web-dist artifact</text>
+    <line x1="265" y1="120" x2="293" y2="120" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-p)"/>
+    <line x1="530" y1="120" x2="558" y2="120" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-p)"/>
+    <line x1="795" y1="120" x2="823" y2="120" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-p)"/>
+    <line x1="1060" y1="120" x2="1088" y2="120" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-p)"/>
+    <line x1="1325" y1="120" x2="1353" y2="120" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-p)"/>
+    <line x1="820" y1="205" x2="820" y2="275" stroke="#f5b544" stroke-width="4" marker-end="url(#arrow-p)"/>
+    <text x="845" y="250" fill="#f5b544" font-size="26">needs: verify</text>
+    <rect x="0" y="285" width="1640" height="180" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="30" y="327" fill="#e8eef8" font-size="28" font-weight="600">e2e</text>
+    <text x="100" y="327" fill="#8ea2c0" font-size="24">End-to-end + accessibility · only when verify is green</text>
+    <rect x="30" y="350" width="360" height="90" rx="12" fill="#0f2233" stroke="#1f5f7f"/>
+    <text x="210" y="405" fill="#e8eef8" font-size="26" text-anchor="middle">install</text>
+    <rect x="430" y="350" width="360" height="90" rx="12" fill="#0f2233" stroke="#1f5f7f"/>
+    <text x="610" y="405" fill="#e8eef8" font-size="26" text-anchor="middle">install Chromium</text>
+    <rect x="830" y="350" width="360" height="90" rx="12" fill="#0f2233" stroke="#1f5f7f"/>
+    <text x="1010" y="405" fill="#e8eef8" font-size="26" text-anchor="middle">pnpm e2e · Playwright + axe</text>
+    <rect x="1230" y="350" width="380" height="90" rx="12" fill="#121b2f" stroke="#22304d"/>
+    <text x="1420" y="405" fill="#e8eef8" font-size="26" text-anchor="middle">upload report</text>
+    <line x1="390" y1="395" x2="428" y2="395" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-p)"/>
+    <line x1="790" y1="395" x2="828" y2="395" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-p)"/>
+    <line x1="1190" y1="395" x2="1228" y2="395" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-p)"/>
+  </svg>
+</section>
+
+<section id="verify-steps" data-part="2" data-cue="Contract drift comes first">
+  <h2>verify: most likely to fail, first</h2>
+  <div class="file">.github/workflows/ci.yml · condensed</div>
+  <pre class="code tight" data-lang="yaml" data-mark="2,3">      # The generated contract types must match openapi.yaml exactly.
+      - name: Contract drift
+        run: pnpm contracts:check
+      - name: Lint (includes architectural boundaries)
+        run: pnpm lint
+      - name: Unit and integration tests (includes the BFF contract test)
+        run: pnpm test
+      - name: Build (fails on Angular bundle budgets)
+        run: pnpm build</pre>
+  <div class="file">package.json</div>
+  <pre class="code tight" data-lang="json">"contracts:check": "pnpm contracts:generate &amp;&amp; git diff --exit-code -- contracts/"</pre>
+</section>
+
+<section id="budgets" data-part="2" data-cue="Then the production build">
+  <h2>The build fails on the budget</h2>
+  <div class="file">apps/web/angular.json · excerpt</div>
+  <pre class="code" data-lang="json" data-mark="5,6">"production": {
+  "budgets": [
+    {
+      "type": "initial",
+      "maximumWarning": "350kB",
+      "maximumError": "500kB"
+    },
+    // …
+  ],</pre>
+  <p class="muted">"The bundle grew" is a failed build, not a quarterly surprise. <span class="small">(Lesson 06)</span></p>
+</section>
+
+<section id="e2e-needs" data-part="2" data-cue="The second job runs Playwright and axe">
+  <h2>End-to-end runs last, and only on green</h2>
+  <div class="file">.github/workflows/ci.yml · excerpt</div>
+  <pre class="code tight" data-lang="yaml" data-mark="3">  e2e:
+    name: End-to-end + accessibility
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # …
+      - name: Install Chromium
+        run: pnpm --filter @coursewright/web exec playwright install --with-deps chromium
+      - name: Playwright (starts the BFF and the web app itself)
+        run: pnpm e2e</pre>
+  <p class="small muted">The slowest checks, and the hardest to debug: never against a change that doesn't lint.</p>
+</section>
+
+<section id="same-commands" data-part="2" data-cue="Notice what the steps run">
+  <h2>CI runs the commands you run</h2>
+  <div class="file">package.json</div>
+  <pre class="code tight" data-lang="json" data-mark="3,4,5,6">"scripts": {
+  "dev": "pnpm --parallel --filter @coursewright/bff --filter @coursewright/web run dev",
+  "test": "pnpm -r --if-present run test",
+  "lint": "pnpm -r --if-present run lint",
+  "build": "pnpm -r --if-present run build",
+  "e2e": "pnpm --filter @coursewright/web run e2e",
+  "contracts:generate": "pnpm --filter @coursewright/contracts run generate",
+  "contracts:check": "pnpm contracts:generate &amp;&amp; git diff --exit-code -- contracts/"
+}</pre>
+  <p class="small muted">Defined once. A red step in CI is the same command, and the same failure, on a laptop.</p>
+</section>
+
+<!-- ───────────── Reproducible and debuggable ───────────── -->
+<section id="reproducible" data-part="3" data-cue="A pipeline you can't reproduce is one you can't trust">
+  <h2>Three settings make installs repeatable</h2>
+  <div class="file">.github/workflows/ci.yml</div>
+  <pre class="code tight" data-lang="yaml" data-mark="2,5,7">      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6 # version comes from "packageManager" in package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile</pre>
+  <div class="cols3">
+    <div class="card"><h3>Frozen lockfile</h3><p>Fails instead of resolving new versions.</p></div>
+    <div class="card"><h3>pnpm@12.6.0</h3><p>Pinned by <span class="accent">packageManager</span>.</p></div>
+    <div class="card"><h3>.nvmrc</h3><p>One file for the Node version.</p></div>
+  </div>
+</section>
+
+<section id="nvmrc" data-part="3" data-cue="Be precise about that last one">
+  <h2>Be precise: a major version, not a pin</h2>
+  <div class="cols">
+    <div>
+      <div class="file">.nvmrc</div>
+      <pre class="code" data-lang="sh">22</pre>
+      <div class="file">package.json · excerpt</div>
+      <pre class="code" data-lang="json">"engines": {
+  "node": "&gt;=22.13"
+},</pre>
+    </div>
+    <div>
+      <div class="card legacy" style="margin-bottom:32px"><h3 class="amber">Today</h3><p>CI can get any Node 22 release.</p></div>
+      <div class="card modern"><h3>Production</h3><p>Pin the exact version: a Node release can't change the build of one commit.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="caching" data-part="3" data-cue="Caching is modest">
+  <h2>Caching is modest</h2>
+  <div class="cols">
+    <div class="card modern">
+      <h3>Cached</h3>
+      <ul>
+        <li>pnpm's package store, via <span class="accent">cache: pnpm</span></li>
+        <li>Keyed on the lockfile</li>
+      </ul>
+    </div>
+    <div class="card legacy">
+      <h3 class="amber">Not cached</h3>
+      <ul>
+        <li>The Angular build cache</li>
+        <li>Playwright's Chromium: installed every run</li>
+      </ul>
+    </div>
+  </div>
+  <p class="muted" style="margin-top:40px">The first places to look when the pipeline gets slow.</p>
+</section>
+
+<section id="artifacts" data-part="3" data-cue="And failures are debuggable without a re-run">
+  <h2>Debug a failure without a re-run</h2>
+  <div class="file">.github/workflows/ci.yml · excerpt</div>
+  <pre class="code tight" data-lang="yaml" data-mark="3,8,10">      - uses: actions/upload-artifact@v7
+        with:
+          name: web-dist
+          path: apps/web/dist/
+          retention-days: 7
+      # …
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7</pre>
+  <div class="file">apps/web/playwright.config.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts">    trace: 'retain-on-failure',</pre>
+</section>
+
+<!-- ───────────── To production ───────────── -->
+<section id="build-once" data-part="4" data-cue="Coursewright stops at continuous integration">
+  <h2>1 · Build once, promote the same artifact</h2>
+  <svg width="1640" height="230" viewBox="0 0 1640 230">
+    <defs><marker id="arrow-b" markerUnits="userSpaceOnUse" markerWidth="22" markerHeight="22" refX="20" refY="11" orient="auto"><path d="M0,0 L22,11 L0,22 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="0" y="50" width="340" height="130" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="170" y="110" fill="#e8eef8" font-size="30" font-weight="600" text-anchor="middle">Build + test</text>
+    <text x="170" y="148" fill="#8ea2c0" font-size="22" text-anchor="middle">once, in CI</text>
+    <rect x="430" y="50" width="340" height="130" rx="18" fill="#0f2233" stroke="#38bdf8" stroke-width="3"/>
+    <text x="600" y="110" fill="#e8eef8" font-size="30" font-weight="600" text-anchor="middle">web-dist</text>
+    <text x="600" y="148" fill="#8ea2c0" font-size="22" text-anchor="middle">one artifact</text>
+    <rect x="860" y="50" width="340" height="130" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="1030" y="125" fill="#e8eef8" font-size="30" font-weight="600" text-anchor="middle">Staging</text>
+    <rect x="1290" y="50" width="340" height="130" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="1460" y="125" fill="#e8eef8" font-size="30" font-weight="600" text-anchor="middle">Production</text>
+    <line x1="345" y1="115" x2="425" y2="115" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-b)"/>
+    <line x1="775" y1="115" x2="855" y2="115" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-b)"/>
+    <line x1="1205" y1="115" x2="1285" y2="115" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-b)"/>
+    <text x="1245" y="30" fill="#38bdf8" font-size="24" text-anchor="middle">promoted unchanged</text>
+  </svg>
+  <p class="small"><span class="amber">A gap in this repo:</span> E2E doesn't test web-dist. It runs the dev server:</p>
+  <div class="file">apps/web/playwright.config.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts">      command: `pnpm exec ng serve --port ${WEB_PORT}`,</pre>
+</section>
+
+<section id="spa-caching" data-part="4" data-cue="Second, deploying a single-page app is mostly about caching">
+  <h2>2 · Deploying an SPA is mostly caching</h2>
+  <div class="file">apps/web/angular.json · production configuration</div>
+  <pre class="code tight" data-lang="json">"outputHashing": "all"</pre>
+  <div class="cols3">
+    <div class="card modern"><h3>main-&lt;hash&gt;.js</h3><p>Content-hashed: cache for a year, immutable.</p></div>
+    <div class="card"><h3>index.html</h3><p>No hash: revalidate on every load. It points at the release.</p></div>
+    <div class="card legacy"><h3 class="amber">Old chunks</h3><p>Keep them a while. Open tabs still ask for them.</p></div>
+  </div>
+</section>
+
+<section id="flags" data-part="4" data-cue="Third, decouple deploy from release with feature flags">
+  <h2>3 · Deploy dark, release by tenant</h2>
+  <div class="steps">
+    <div class="step on"><span class="num">1</span>Deploy, flag off<span class="tag">dark</span></div>
+    <div class="step"><span class="num">2</span>Your internal tenant<span class="tag">dogfood</span></div>
+    <div class="step"><span class="num">3</span>5% of customer tenants<span class="tag">canary</span></div>
+    <div class="step"><span class="num">4</span>25%, then 100%<span class="tag">ramp</span></div>
+    <div class="step"><span class="num">5</span>Remove the flag<span class="tag">by expiry</span></div>
+  </div>
+  <p class="muted" style="margin-top:40px">Every flag has an owner and an expiry date, or it becomes a permanent branch.</p>
+</section>
+
+<section id="flag-sketch" data-part="4" data-cue="The tenant comes from the verified token, as lesson eight explains">
+  <h2>The BFF can decide: it knows the tenant</h2>
+  <div class="file">Sketch · not in this repo · a flag decided from the verified token</div>
+  <pre class="code" data-lang="ts" data-mark="6">const flags = {
+  newCatalog: { owner: 'catalog-team', expires: '2026-12-31', percent: 5 },
+};
+
+app.get('/me/flags', async (request) =&gt; ({
+  newCatalog: inRollout(request.user.tenantId, flags.newCatalog.percent),
+}));</pre>
+  <p class="small muted">Bucket by a hash of the tenant ID, so a tenant doesn't flip between requests. Lesson 08: the tenant comes from the token.</p>
+</section>
+
+<section id="rollback" data-part="4" data-cue="Fourth, roll out progressively">
+  <h2>4 · Roll back on what users feel</h2>
+  <div class="cols">
+    <div class="card"><h3>Compare cohorts</h3><p>With the change vs without: error rate, INP and LCP at the 75th percentile.</p></div>
+    <div class="card modern"><h3>Measurably worse?</h3><p>Flag off automatically. No redeploy.</p></div>
+  </div>
+  <p class="amber small" style="margin-top:40px">Needs the release and the flag on every RUM event. Coursewright's events don't carry them yet.</p>
+</section>
+
+<!-- ───────────── One trace ID ───────────── -->
+<section id="adr6" data-part="5" data-cue="Open ADR six, the observability decision">
+  <div class="file">docs/adr/0006-observability.md · Context</div>
+  <p class="quote">"The catalog is slow" and "I got an error" are the two most common frontend reports.</p>
+  <ul style="margin-top:48px">
+    <li>What did this user's requests do on the server?</li>
+    <li>How does the page perform for real users?</li>
+  </ul>
+</section>
+
+<section id="traceparent" data-part="5" data-cue="The first answer is a trace ID">
+  <h2>A W3C traceparent header</h2>
+  <svg width="1640" height="330" viewBox="0 0 1640 330">
+    <rect x="0" y="40" width="120" height="100" rx="14" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="60" y="104" fill="#e8eef8" font-size="36" text-anchor="middle" style="font-family:&quot;Cascadia Mono&quot;, Consolas, monospace">00</text>
+    <text x="140" y="104" fill="#8ea2c0" font-size="36" text-anchor="middle">-</text>
+    <rect x="160" y="40" width="860" height="100" rx="14" fill="#0f2233" stroke="#38bdf8" stroke-width="3"/>
+    <text x="590" y="104" fill="#38bdf8" font-size="36" text-anchor="middle" style="font-family:&quot;Cascadia Mono&quot;, Consolas, monospace">4bf92f3577b34da6a3ce929d0e0e4736</text>
+    <text x="1040" y="104" fill="#8ea2c0" font-size="36" text-anchor="middle">-</text>
+    <rect x="1060" y="40" width="420" height="100" rx="14" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="1270" y="104" fill="#e8eef8" font-size="36" text-anchor="middle" style="font-family:&quot;Cascadia Mono&quot;, Consolas, monospace">00f067aa0ba902b7</text>
+    <text x="1500" y="104" fill="#8ea2c0" font-size="36" text-anchor="middle">-</text>
+    <rect x="1520" y="40" width="120" height="100" rx="14" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="1580" y="104" fill="#e8eef8" font-size="36" text-anchor="middle" style="font-family:&quot;Cascadia Mono&quot;, Consolas, monospace">01</text>
+    <text x="60" y="190" fill="#8ea2c0" font-size="24" text-anchor="middle">version</text>
+    <text x="590" y="190" fill="#38bdf8" font-size="26" text-anchor="middle">trace ID · 16 bytes · 32 hex</text>
+    <text x="590" y="226" fill="#8ea2c0" font-size="22" text-anchor="middle">the same on every hop, and in every log line</text>
+    <text x="1270" y="190" fill="#8ea2c0" font-size="24" text-anchor="middle">parent span ID · 8 bytes</text>
+    <text x="1270" y="226" fill="#8ea2c0" font-size="22" text-anchor="middle">new on every hop</text>
+    <text x="1580" y="190" fill="#8ea2c0" font-size="24" text-anchor="middle">flags</text>
+    <text x="1580" y="226" fill="#8ea2c0" font-size="22" text-anchor="middle">sampled</text>
+  </svg>
+  <p class="small muted">Added by the web app's trace interceptor to every <span class="accent">/api/</span> request.</p>
+</section>
+
+<section id="trace-interceptor" data-part="5" data-cue="Every call gets its own trace">
+  <h2>The trace interceptor</h2>
+  <div class="file">apps/web/src/app/core/observability/trace.interceptor.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="5,9">export function createTraceparent(traceId = createTraceId()): string {
+  return `00-${traceId}-${randomHex(8)}-01`;
+}
+// …
+// Every call gets its own trace, which the BFF continues and returns in problem+json `traceId`,
+// so a user-reported error leads straight to the server logs for that request.
+export const traceInterceptor: HttpInterceptorFn = (request, next) =&gt;
+  request.url.startsWith('/api/')
+    ? next(request.clone({ setHeaders: { traceparent: createTraceparent() } }))
+    : next(request);</pre>
+  <p class="small muted">The random bytes come from <span class="accent">crypto.getRandomValues</span>.</p>
+</section>
+
+<section id="interceptor-order" data-part="5" data-cue="The order of the interceptors matters">
+  <h2>Tracing runs before auth</h2>
+  <div class="file">apps/web/src/app/app.config.ts · excerpt</div>
+  <pre class="code" data-lang="ts" data-mark="4,5">export const appConfig: ApplicationConfig = {
+  providers: [
+    // …
+    // Order matters: tracing runs first, so a refresh-and-retry keeps the same traceparent.
+    provideHttpClient(withInterceptors([traceInterceptor, authInterceptor])),
+    // …
+  ],
+};</pre>
+  <p class="muted">A 401, a refresh, a retry (lesson 08): both attempts share one trace ID in the logs.</p>
+</section>
+
+<section id="genreqid" data-part="5" data-cue="Now the server">
+  <h2>The BFF makes the trace ID the request ID</h2>
+  <div class="file">apps/bff/src/observability.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="8,9,10">// W3C Trace Context: version-traceid-parentid-flags, lowercase hex.
+const TRACEPARENT = /^00-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$/;
+// …
+  // The spec makes all-zero ids invalid. Start a fresh trace rather than join a bogus one.
+  return ALL_ZEROS.test(traceId) || ALL_ZEROS.test(parentId) ? undefined : traceId;
+// …
+export const traceLogging = {
+  genReqId: (request: IncomingMessage) =&gt;
+    traceIdFrom(request.headers.traceparent) ?? randomBytes(16).toString('hex'),
+  logController: new LogController({ requestIdLogLabel: 'trace_id' }),
+};</pre>
+  <p class="small muted">Passed to <span class="accent">Fastify({ logger, ...traceLogging })</span> in app.ts.</p>
+</section>
+
+<section id="log-lines" data-part="5" data-cue="Then a LogController whose request ID label">
+  <h2>trace_id on every log line</h2>
+  <div class="file">Real output · the BFF log for one request with a known traceparent · condensed</div>
+  <pre class="code tight" data-lang="json" data-mark="1,3">{ "level": 30, "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+  "req": { "method": "GET", "url": "/api/me/enrollments" }, "msg": "incoming request" }
+{ "level": 30, "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+  "res": { "statusCode": 401 }, "responseTime": 2.77, "msg": "request completed" }</pre>
+  <p class="muted">Pino, structured JSON. One search for the trace ID finds the whole request.</p>
+</section>
+
+<section id="hooks" data-part="5" data-cue="Two response headers close the loop">
+  <h2>Two response headers close the loop</h2>
+  <div class="file">apps/bff/src/observability.ts · condensed</div>
+  <pre class="code tight" data-lang="ts" data-mark="6,11">export function registerObservability(app: FastifyInstance): void {
+  // …
+  app.addHook('onRequest', async (request, reply) =&gt; {
+    request.startTime = performance.now();
+    // Same trace, new span id: this server's work is a child of the caller's span.
+    reply.header('traceparent', `00-${request.id}-${randomBytes(8).toString('hex')}-01`);
+  });
+  app.addHook('onSend', async (request, reply) =&gt; {
+    // Browsers show Server-Timing in DevTools and expose it to RUM via PerformanceResourceTiming.
+    const duration = performance.now() - request.startTime;
+    reply.header('server-timing', `app;dur=${duration.toFixed(1)}`);
+  });
+}</pre>
+</section>
+
+<section id="problem" data-part="5" data-cue="And every error carries the ID">
+  <h2>Every problem carries the trace ID</h2>
+  <div class="file">apps/bff/src/problem.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="6,10">export function sendProblem(reply: FastifyReply, problem: ProblemInit): FastifyReply {
+  // …
+  return reply
+    .code(status)
+    .type('application/problem+json')
+    .send({ type, title, status, detail, traceId: reply.request.id });
+}
+// …
+    request.log.error({ err: error }, 'unhandled error');
+    // Don't echo internals to the client. The traceId in the body finds this log line.
+    return sendProblem(reply, { status: 500 });</pre>
+</section>
+
+<section id="obs-test" data-part="5" data-cue="The tests pin this down">
+  <h2>The test pins it down</h2>
+  <div class="file">apps/bff/test/observability.test.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="8,10,11">it('continues the caller trace with a new span, and puts its id in problems', async () =&gt; {
+  const response = await app.inject({
+    url: '/api/me/enrollments',
+    headers: { traceparent: `00-${TRACE_ID}-${PARENT_ID}-01` },
+  });
+
+  const [version, traceId, spanId, flags] = String(response.headers['traceparent']).split('-');
+  expect([version, traceId, flags]).toEqual(['00', TRACE_ID, '01']);
+  expect(spanId).toMatch(/^[0-9a-f]{16}$/);
+  expect(spanId).not.toBe(PARENT_ID);
+  expect(response.json()).toMatchObject({ status: 401, traceId: TRACE_ID });
+});</pre>
+  <p class="small muted">Also: missing, malformed or all-zero headers start a new trace; Server-Timing on every response.</p>
+</section>
+
+<!-- ───────────── Real-user monitoring ───────────── -->
+<section id="rum-vitals" data-part="6" data-cue="The second answer is real-user monitoring">
+  <h2>Real-user monitoring</h2>
+  <div class="file">apps/web/src/app/core/observability/rum.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,3">// Loaded lazily: monitoring code shouldn't compete with the page for the initial bundle.
+private async observeWebVitals(): Promise&lt;void&gt; {
+  const { onCLS, onINP, onLCP } = await import('web-vitals');
+  const report = ({ name, value, rating }: Metric) =&gt;
+    this.record({ kind: 'web-vital', name, value, rating, url: this.url() });
+  onLCP(report);
+  onINP(report);
+  onCLS(report);
+}</pre>
+  <p class="small muted">What it measures: lesson 06. This lesson: how the data leaves the page.</p>
+</section>
+
+<section id="rum-batch" data-part="6" data-cue="Events are batched">
+  <h2>Batched, and sent when the page is hidden</h2>
+  <div class="file">apps/web/src/app/core/observability/rum.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="3,4,6,13">start(): void {
+  // …
+  // "hidden" is the last event a page reliably gets: mobile browsers may discard a background
+  // tab without ever firing unload. web-vitals reports its final LCP/INP/CLS values then, too.
+  this.document.addEventListener('visibilitychange', () =&gt; {
+    if (this.document.visibilityState === 'hidden') this.flush();
+  });
+}
+// …
+private record(event: RumEvent): void {
+  // …
+  this.batch.push(event);
+  if (this.batch.length &gt;= MAX_BATCH) this.flush();
+}</pre>
+  <p class="small muted"><span class="accent">const MAX_BATCH = 10;</span> at the top of the file.</p>
+</section>
+
+<section id="sendbeacon" data-part="6" data-cue="The batch goes out with">
+  <h2>sendBeacon: survives the page going away</h2>
+  <div class="file">apps/web/src/app/core/observability/rum.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="5,6,7">private flush(): void {
+  if (this.batch.length === 0) return;
+  const body: RumBatch = { events: this.batch };
+  this.batch = [];
+  // sendBeacon survives the page going away, but can't set headers, so /api/rum is
+  // unauthenticated. A string body is sent as text/plain, which the BFF accepts.
+  navigator.sendBeacon('/api/rum', JSON.stringify(body));
+}</pre>
+  <div class="cols">
+    <div class="card legacy"><h3 class="amber">No headers</h3><p>No bearer token: the endpoint is public.</p></div>
+    <div class="card legacy"><h3 class="amber">text/plain</h3><p>A string body isn't sent as JSON.</p></div>
+  </div>
+</section>
+
+<section id="rum-route" data-part="6" data-cue="registers a parser for">
+  <h2>The BFF accepts the beacon</h2>
+  <div class="file">apps/bff/src/routes/rum.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="4,5,6,7,12">export const rumRoutes: FastifyPluginAsync = async (app) =&gt; {
+  // navigator.sendBeacon(url, string) sends the JSON as text/plain. Parse that as JSON too, with
+  // Fastify's own safe parser (it rejects __proto__ tricks). The parser is scoped to this plugin.
+  app.addContentTypeParser(
+    'text/plain',
+    { parseAs: 'string' },
+    app.getDefaultJsonParser('error', 'error'),
+  );
+  // …
+  app.post&lt;{ Body: RumBatch }&gt;(
+    '/rum',
+    { config: { public: true }, schema: { body: { $ref: 'RumBatch#' } } },
+    // …</pre>
+  <p class="small muted">Validated against the contract; each event logged; 202. Production: rate-limit it.</p>
+</section>
+
+<section id="error-handler" data-part="6" data-cue="Errors take a different path">
+  <h2>Uncaught errors, with their trace ID</h2>
+  <div class="file">apps/web/src/app/core/observability/global-error-handler.ts · condensed</div>
+  <pre class="code tight" data-lang="ts" data-mark="7,12">/** Uncaught errors (and, via provideBrowserGlobalErrorListeners, window errors) end up here. */
+@Injectable()
+export class GlobalErrorHandler implements ErrorHandler {
+  private readonly rum = inject(Rum);
+  handleError(error: unknown): void {
+    console.error(error);
+    this.rum.recordError(describe(error));
+  }
+}
+// …
+  if (error instanceof HttpErrorResponse) {
+    // The trace id links this client error to the BFF's logs for the same request.
+    const traceId = traceIdOf(error.headers.get('traceparent'));
+    return { name: `HTTP ${error.status}`, message: error.message, traceId };</pre>
+  <p class="small muted">app.config.ts: <span class="accent">provideBrowserGlobalErrorListeners()</span> and <span class="accent">{ provide: ErrorHandler, useClass: GlobalErrorHandler }</span></p>
+</section>
+
+<!-- ───────────── Error to request ───────────── -->
+<section id="full-trip" data-part="7" data-cue="Put the pieces together">
+  <h2>From an error to its log lines</h2>
+  <svg width="1640" height="560" viewBox="0 0 1640 560">
+    <defs><marker id="arrow-t" markerUnits="userSpaceOnUse" markerWidth="22" markerHeight="22" refX="20" refY="11" orient="auto"><path d="M0,0 L22,11 L0,22 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="0" y="120" width="360" height="250" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="180" y="180" fill="#e8eef8" font-size="32" font-weight="600" text-anchor="middle">Browser</text>
+    <text x="180" y="225" fill="#8ea2c0" font-size="22" text-anchor="middle">trace interceptor</text>
+    <text x="180" y="260" fill="#8ea2c0" font-size="22" text-anchor="middle">GlobalErrorHandler</text>
+    <text x="180" y="295" fill="#8ea2c0" font-size="22" text-anchor="middle">Rum → sendBeacon</text>
+    <rect x="640" y="120" width="360" height="250" rx="18" fill="#121b2f" stroke="#38bdf8" stroke-width="3"/>
+    <text x="820" y="180" fill="#e8eef8" font-size="32" font-weight="600" text-anchor="middle">BFF</text>
+    <text x="820" y="225" fill="#8ea2c0" font-size="22" text-anchor="middle">genReqId = trace ID</text>
+    <text x="820" y="260" fill="#8ea2c0" font-size="22" text-anchor="middle">problem + traceId</text>
+    <text x="820" y="295" fill="#8ea2c0" font-size="22" text-anchor="middle">POST /api/rum</text>
+    <rect x="1240" y="60" width="400" height="370" rx="18" fill="#0f2233" stroke="#1f5f7f" stroke-width="2"/>
+    <text x="1440" y="110" fill="#e8eef8" font-size="30" font-weight="600" text-anchor="middle">Logs</text>
+    <text x="1440" y="150" fill="#38bdf8" font-size="22" text-anchor="middle">search: 4bf92f35…</text>
+    <text x="1265" y="210" fill="#e8eef8" font-size="20" style="font-family:&quot;Cascadia Mono&quot;, Consolas, monospace">trace_id 4bf92f35…</text>
+    <text x="1265" y="238" fill="#8ea2c0" font-size="20">incoming request</text>
+    <text x="1265" y="288" fill="#e8eef8" font-size="20" style="font-family:&quot;Cascadia Mono&quot;, Consolas, monospace">trace_id 4bf92f35…</text>
+    <text x="1265" y="316" fill="#8ea2c0" font-size="20">request completed · 500</text>
+    <text x="1265" y="366" fill="#f5b544" font-size="20" style="font-family:&quot;Cascadia Mono&quot;, Consolas, monospace">rum.traceId 4bf92f35…</text>
+    <text x="1265" y="394" fill="#8ea2c0" font-size="20">rum event · HTTP 500</text>
+    <line x1="365" y1="170" x2="632" y2="170" stroke="#38bdf8" stroke-width="4" marker-end="url(#arrow-t)"/>
+    <text x="500" y="150" fill="#38bdf8" font-size="22" text-anchor="middle">1 · traceparent</text>
+    <line x1="635" y1="320" x2="368" y2="320" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-t)"/>
+    <text x="500" y="355" fill="#8ea2c0" font-size="22" text-anchor="middle">2 · traceparent + traceId</text>
+    <line x1="1005" y1="245" x2="1232" y2="245" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-t)"/>
+    <text x="1118" y="225" fill="#8ea2c0" font-size="22" text-anchor="middle">trace_id</text>
+    <path d="M180,375 C180,520 820,520 820,378" fill="none" stroke="#f5b544" stroke-width="4" stroke-dasharray="10 8" marker-end="url(#arrow-t)"/>
+    <text x="500" y="540" fill="#f5b544" font-size="22" text-anchor="middle">3 · sendBeacon: the error, with its traceId</text>
+  </svg>
+</section>
+
+<section id="gaps" data-part="7" data-cue="Now be honest about the gaps">
+  <h2>Be honest about the gaps</h2>
+  <div class="cols3">
+    <div class="card legacy"><h3 class="amber">Handled errors</h3><p>Stores catch them with problemMessage(). The global handler never sees them, so no beacon.</p></div>
+    <div class="card legacy"><h3 class="amber">Not on screen</h3><p>The message shows detail or title. The user has no ID to quote.</p></div>
+    <div class="card legacy"><h3 class="amber">Per call, not per click</h3><p>Two requests, two trace IDs. OTel adds a root span for the interaction.</p></div>
+  </div>
+  <div class="file" style="margin-top:36px">apps/web/src/app/core/problem.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts">  return isProblem(error.error) ? (error.error.detail ?? error.error.title) : fallback;</pre>
+  <p class="small"><span class="accent">The fix:</span> a short reference code with the message, and handled server errors recorded in the same helper.</p>
+</section>
+
+<!-- ───────────── Alerting ───────────── -->
+<section id="symptoms" data-part="8" data-cue="Collecting data isn't monitoring">
+  <h2>Collecting data isn't monitoring</h2>
+  <p class="small muted">ADR-0006: "RUM is only logged. Nothing aggregates it into percentiles or alerts."</p>
+  <div class="cols" style="margin-top:24px">
+    <div class="card legacy">
+      <h3 class="amber">Causes</h3>
+      <ul>
+        <li>A CPU spike nobody notices</li>
+        <li>A restarted instance</li>
+      </ul>
+    </div>
+    <div class="card modern">
+      <h3>Symptoms users feel</h3>
+      <ul>
+        <li>Error rate</li>
+        <li>Latency percentiles</li>
+        <li>Web vitals</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="slo" data-part="8" data-cue="the ADR's example is a good one">
+  <h2>A service level objective</h2>
+  <p class="quote">99% of catalog searches render within <span class="accent">1 s</span>.</p>
+  <div class="cols" style="margin-top:48px">
+    <div class="card"><h3>Error budget</h3><p>The 1% that may miss, over 30 days.</p></div>
+    <div class="card"><h3>Measured</h3><p>From real users, with BFF response time as a second view.</p></div>
+  </div>
+</section>
+
+<section id="burn" data-part="8" data-cue="Then alert on how fast you're spending the budget">
+  <h2>Alert on the burn rate</h2>
+  <div class="cols">
+    <div class="card modern">
+      <h3>Fast burn → page</h3>
+      <p>The last hour would spend ~2% of a 30-day budget: a burn rate of ~14×.</p>
+    </div>
+    <div class="card">
+      <h3>Slow burn → ticket</h3>
+      <p>A lower rate, sustained over several hours.</p>
+    </div>
+  </div>
+  <p class="muted" style="margin-top:40px">No paging on noise. A real regression still pages within minutes.</p>
+</section>
+
+<section id="investigation" data-part="8" data-cue="Now the investigation">
+  <h2>"The catalog is slow since Tuesday"</h2>
+  <div class="steps">
+    <div class="step"><span class="num">1</span>Define slow: LCP, INP or server latency</div>
+    <div class="step"><span class="num">2</span>What changed Tuesday? Deploy, flag, data</div>
+    <div class="step"><span class="num">3</span>Split the time: Server-Timing vs total</div>
+    <div class="step"><span class="num">4</span>That endpoint, that tenant: before vs after</div>
+    <div class="step"><span class="num">5</span>Fix; confirm on the same metric</div>
+    <div class="step"><span class="num">6</span>Add the alert that would have caught it</div>
+  </div>
+</section>
+
+<section id="like-query" data-part="8" data-cue="In Coursewright, the search filters titles">
+  <h2>Where a bigger catalog would hurt</h2>
+  <div class="file">apps/bff/src/routes/courses.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,2">  const where = ['c.tenant_id = ?', "c.title LIKE ? ESCAPE '\\'"];
+  const params: SQLInputValue[] = [tenantId, `%${escapeLike(q)}%`];
+  if (after) {
+    where.push('(c.title, c.id) &gt; (?, ?)'); // SQLite row values compare title first, then id
+    params.push(after.title, after.id);
+  }
+  const sql = `
+    SELECT ${SUMMARY_COLUMNS}
+    FROM courses c
+    WHERE ${where.join(' AND ')}
+    ORDER BY c.title, c.id
+    LIMIT ?`;</pre>
+  <p class="small muted">A leading % can't seek: a rare term checks every title the tenant has before LIMIT is met.</p>
+</section>
+
+<!-- ───────────── Production would add ───────────── -->
+<section id="production" data-part="9" data-cue="The ADR's production mapping is short">
+  <h2>What production would add</h2>
+  <ul>
+    <li>OpenTelemetry web and Node SDKs → a collector that redacts, samples and forwards</li>
+    <li>Same W3C header: new exporters, not a new contract</li>
+    <li>Source maps uploaded, so stack traces are readable</li>
+    <li>A release and a tenant on every RUM event: <span class="accent">openapi.yaml</span> first</li>
+  </ul>
+</section>
+
+<!-- ───────────── Traps ───────────── -->
+<section id="traps" data-part="10" data-cue="Running end-to-end tests before the cheap checks">
+  <h2>Traps</h2>
+  <ul class="small">
+    <li>End-to-end tests before the cheap checks</li>
+    <li>A floating toolchain: unfrozen lockfile, unpinned versions</li>
+    <li>Rebuilding for each environment</li>
+    <li>Deleting the previous release's chunks on deploy</li>
+    <li>Sending RUM on unload</li>
+    <li>A trace ID that never reaches the error the user sees</li>
+    <li>Personal data in RUM: full URLs carry search text</li>
+    <li>Alerting on causes rather than symptoms</li>
+  </ul>
+</section>
+
+<!-- ───────────── Interview drill ───────────── -->
+<section id="drill" data-part="11" data-cue="Let's practise">
+  <div class="kicker">Interview drill</div>
+  <h1>Five questions</h1>
+  <p class="lead">After each question, pause and answer out loud. Then compare with the model answer.</p>
+</section>
+
+<section id="q1" data-part="11" data-cue="How do you connect a frontend error to the backend request that caused it?" data-voice="interviewer">
+  <div class="kicker">Question 1 of 5</div>
+  <p class="question">How do you connect a frontend error to the backend request that caused it?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a1" data-part="11" data-cue="With one W3C trace ID">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>A traceparent header on every API call</li>
+    <li>The BFF makes the trace ID the request ID: trace_id on every log line</li>
+    <li>Returned in the response header and the problem's traceId</li>
+    <li>The error handler beacons it; one search finds both sides</li>
+    <li>Show a short reference code to the user, for support</li>
+  </ul>
+</section>
+
+<section id="q2" data-part="11" data-cue="Continuous integration takes twenty-five minutes. How do you get it under ten?" data-voice="interviewer">
+  <div class="kicker">Question 2 of 5</div>
+  <p class="question">CI takes 25 minutes. How do you get it under 10?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a2" data-part="11" data-cue="Measure first: which steps dominate">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Measure the critical path; cheap checks first</li>
+    <li>Cache the store, the build cache, the browsers</li>
+    <li>Parallel jobs; shard E2E; only the journeys that matter</li>
+    <li>Test the built artifact; move low-signal checks after merge</li>
+    <li>With a project graph: affected-only</li>
+  </ul>
+</section>
+
+<section id="q3" data-part="11" data-cue="How do you ship a risky frontend change to five percent of tenants first?" data-voice="interviewer">
+  <div class="kicker">Question 3 of 5</div>
+  <p class="question">How do you ship a risky frontend change to 5% of tenants first?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a3" data-part="11" data-cue="Deploy it dark behind a feature flag">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Deploy dark; release by tenant, from the verified token</li>
+    <li>Internal tenant, then 5% of customers</li>
+    <li>Compare cohorts on errors and web vitals</li>
+    <li>Flag off is the rollback; the flag has an owner and expiry</li>
+  </ul>
+</section>
+
+<section id="q4" data-part="11" data-cue="A deploy raised the seventy-fifth percentile of INP by eighty milliseconds" data-voice="interviewer">
+  <div class="kicker">Question 4 of 5</div>
+  <p class="question">A deploy raised INP p75 by 80 ms. How would you have caught it before 100%?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a4" data-part="11" data-cue="INP is a field metric">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>INP is a field metric: lab tests alone won't catch it</li>
+    <li>Tag every RUM event with the release</li>
+    <li>Small cohort first; compare p75 with the previous release</li>
+    <li>Halt automatically past a threshold, with enough samples</li>
+  </ul>
+</section>
+
+<section id="q5" data-part="11" data-cue="A tenant reports that the catalog has been slow since Tuesday" data-voice="interviewer">
+  <div class="kicker">Question 5 of 5</div>
+  <p class="question">"The catalog has been slow since Tuesday." Walk through your investigation.</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a5" data-part="11" data-cue="First, define slow">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Define slow: first load, typing, or results</li>
+    <li>What changed Tuesday: deploy, flag, data</li>
+    <li>Server-Timing vs total; then logs and the query plan</li>
+    <li>Fix, confirm on the same metric, add the alert</li>
+  </ul>
+</section>
+
+<!-- ───────────── Recap ───────────── -->
+<template id="recap">
+  <h2>Five things to remember</h2>
+  <ol class="recap">
+    <li class="item">Cheapest and most likely to fail first; the commands you run locally.</li>
+    <li class="item">Reproducible and debuggable: frozen lockfile, pinned tools, artifacts.</li>
+    <li class="item">Build once, promote; flags with owners; roll out by tenant.</li>
+    <li class="item">One trace ID: traceparent → genReqId → trace_id → traceId in errors.</li>
+    <li class="item">Beacon RUM when hidden; alert on symptoms with SLOs and burn rates.</li>
+  </ol>
+</template>
+<section id="recap-0" data-part="12" data-cue="Five things to remember" data-template="recap" data-show="0"></section>
+<section id="recap-1" data-part="12" data-cue="One: order the pipeline cheapest" data-template="recap" data-show="1"></section>
+<section id="recap-2" data-part="12" data-cue="Two: make it reproducible and debuggable" data-template="recap" data-show="2"></section>
+<section id="recap-3" data-part="12" data-cue="Three: build once and promote" data-template="recap" data-show="3"></section>
+<section id="recap-4" data-part="12" data-cue="Four: one trace ID links the browser to the log line" data-template="recap" data-show="4"></section>
+<section id="recap-5" data-part="12" data-cue="Five: RUM leaves the page in a beacon" data-template="recap" data-show="5"></section>
+
+<section id="next" data-part="12" data-cue="In the next lesson">
+  <div class="kicker">Next · the last lesson</div>
+  <h1>12 · Evolving a Large Frontend</h1>
+  <p class="lead">Technical debt as a portfolio, strangling instead of rewriting, reviews that teach, and the multi-sprint story.</p>
+</section>
+
+<script src="../assets/slides.js"></script>
+</body>
+</html>

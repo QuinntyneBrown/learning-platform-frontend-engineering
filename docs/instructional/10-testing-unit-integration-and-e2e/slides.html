@@ -1,0 +1,723 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 10 Slides</title>
+<!--
+  Slides for the lesson 10 video. Each <section> is one slide. data-cue is a phrase from script.md:
+  tools/instructional-video/build.cs shows the slide from the moment the narration reaches that phrase.
+  Open this file in a browser and use the arrow keys to step through the deck.
+-->
+<link rel="stylesheet" href="../assets/slides.css">
+</head>
+<body data-lesson-number="10" data-lesson-title="Testing: Unit, Integration and E2E" data-parts="Introduction|The questions|Three levels|A race|Time and retries|Components|BFF integration|Contract test|End-to-end|Flaky and fast|What goes where|Production|Traps|Interview drill|Recap">
+
+<!-- ───────────── Intro ───────────── -->
+<section id="title" data-part="0">
+  <div class="kicker">Coursewright frontend · Lesson 10</div>
+  <h1>Testing: Unit,<br>Integration and E2E</h1>
+  <p class="lead">What belongs at each level, how to make races and retries deterministic, and why the end-to-end suite runs with zero retries.</p>
+</section>
+
+<!-- ───────────── Questions ───────────── -->
+<section id="questions" data-part="1" data-cue="The questions this lesson answers">
+  <h2>The questions this lesson answers</h2>
+  <ul>
+    <li>Unit vs integration vs E2E for the enroll feature?</li>
+    <li>How do you test a race condition deterministically?</li>
+    <li>An E2E test fails 1 run in 20. What's your process?</li>
+    <li>How do you keep an E2E suite under 10 minutes?</li>
+    <li>What does the contract test catch that TypeScript can't?</li>
+  </ul>
+</section>
+
+<section id="thesis" data-part="1" data-cue="Keep one sentence in your head while you listen">
+  <div class="kicker">The thesis</div>
+  <p class="quote">Test behaviour at the <span class="accent">cheapest level</span> that can see it.</p>
+  <p class="muted" style="margin-top:48px">Own time and order, so every test gives the same answer on every run.</p>
+</section>
+
+<!-- ───────────── Three levels ───────────── -->
+<section id="pyramid" data-part="2" data-cue="Coursewright has three kinds of test">
+  <h2>Three levels, with real numbers</h2>
+  <svg width="1640" height="560" viewBox="0 0 1640 560">
+    <polygon points="820,10 1010,170 630,170" fill="#221b0d" stroke="#f5b544" stroke-width="3"/>
+    <text x="820" y="120" fill="#e8eef8" font-size="30" font-weight="600" text-anchor="middle">E2E</text>
+    <text x="820" y="155" fill="#8ea2c0" font-size="20" text-anchor="middle">8 tests</text>
+    <polygon points="620,180 1020,180 1210,350 430,350" fill="#121b2f" stroke="#38bdf8" stroke-width="3"/>
+    <text x="820" y="255" fill="#e8eef8" font-size="30" font-weight="600" text-anchor="middle">BFF integration + contract</text>
+    <text x="820" y="300" fill="#8ea2c0" font-size="22" text-anchor="middle">55 tests · about 2 s</text>
+    <polygon points="420,360 1220,360 1420,540 220,540" fill="#0f2233" stroke="#1f5f7f" stroke-width="3"/>
+    <text x="820" y="440" fill="#e8eef8" font-size="30" font-weight="600" text-anchor="middle">Web unit</text>
+    <text x="820" y="485" fill="#8ea2c0" font-size="22" text-anchor="middle">32 tests · a few seconds</text>
+    <text x="1060" y="90" fill="#8ea2c0" font-size="22">Playwright + axe · real browser, real BFF</text>
+    <text x="1250" y="265" fill="#8ea2c0" font-size="22">Vitest · app.inject</text>
+    <text x="1250" y="297" fill="#8ea2c0" font-size="22">real app, real SQLite</text>
+    <text x="1450" y="445" fill="#8ea2c0" font-size="22">ng test · Vitest</text>
+    <text x="1450" y="477" fill="#8ea2c0" font-size="22">simulated DOM</text>
+    <text x="0" y="265" fill="#e8eef8" font-size="24">fewer, slower,</text>
+    <text x="0" y="297" fill="#e8eef8" font-size="24">more of the system</text>
+    <text x="0" y="445" fill="#e8eef8" font-size="24">many, fast,</text>
+    <text x="0" y="477" fill="#e8eef8" font-size="24">one piece at a time</text>
+  </svg>
+</section>
+
+<section id="runners" data-part="2" data-cue="Web unit tests run through ng test">
+  <h2>Two runners, one tool</h2>
+  <div class="file">apps/web/angular.json · excerpt</div>
+  <pre class="code tight" data-lang="json" data-mark="2">"test": {
+  "builder": "@angular/build:unit-test"
+},</pre>
+  <div class="file">apps/bff/vitest.config.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="3,4">export default defineConfig({
+  test: {
+    include: ['test/**/*.test.ts'],
+    environment: 'node',
+    // node:sqlite still prints an ExperimentalWarning in Node 22; it's noise in every test worker.
+    execArgv: ['--disable-warning=ExperimentalWarning'],
+  },
+});</pre>
+  <p class="small muted">The web runner uses Vitest with jsdom; the BFF runs plain Node.</p>
+</section>
+
+<section id="numbers" data-part="2" data-cue="That's the testing pyramid, with real numbers">
+  <h2>The pyramid, as the terminal shows it</h2>
+  <div class="file">Real output from this repo · condensed</div>
+  <pre class="code" data-lang="sh" data-mark="3,7">$ pnpm --filter @coursewright/web test
+ Test Files  7 passed (7)
+      Tests  32 passed (32)
+   Duration  3.91s
+$ pnpm --filter @coursewright/bff test
+ Test Files  6 passed (6)
+      Tests  55 passed (55)
+   Duration  2.11s</pre>
+  <p class="muted">The rule for all of them: test behaviour, not implementation.</p>
+</section>
+
+<!-- ───────────── A race ───────────── -->
+<section id="store-under-test" data-part="3" data-cue="Open features/catalog/catalog.store.spec.ts">
+  <h2>What's under test: a race by design</h2>
+  <div class="file">apps/web/src/app/features/catalog/catalog.store.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="3,7,8,9">search: rxMethod&lt;string&gt;(
+  pipe(
+    debounceTime(250),
+    map((query) =&gt; query.trim()),
+    distinctUntilChanged(),
+    tap((query) =&gt; patchState(store, { query, status: 'loading', error: null })),
+    // switchMap cancels the stale request, so a slow response for an old query can't
+    // arrive late and overwrite the results for the newer one.
+    switchMap((query) =&gt;
+      api.searchCourses({ q: query }).pipe(
+      // …</pre>
+  <p class="small muted">A race depends on two things: time and order. The spec takes control of both. (The pipeline itself: lesson 03.)</p>
+</section>
+
+<section id="two-tools" data-part="3" data-cue="Time belongs to fake timers">
+  <h2>Own time. Own order.</h2>
+  <div class="cols">
+    <div class="card modern"><h3>Fake timers own time</h3><p>The debounce fires only when the test advances the clock. No sleeping.</p></div>
+    <div class="card modern"><h3>HttpTestingController owns order</h3><p>Every request waits until the test flushes it, in whatever order the test chooses.</p></div>
+  </div>
+</section>
+
+<section id="debounce-test" data-part="3" data-cue="debounces rapid keystrokes into one request for the final query">
+  <h2>Three keystrokes, one request</h2>
+  <div class="file">apps/web/src/app/features/catalog/catalog.store.spec.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2,10,12,13">beforeEach(() =&gt; {
+  vi.useFakeTimers();
+  // …
+});
+
+it('debounces rapid keystrokes into one request for the final query', () =&gt; {
+  store.search('a');
+  store.search('an');
+  store.search('ang');
+  vi.advanceTimersByTime(250);
+
+  const request = http.expectOne((r) =&gt; r.url === '/api/courses');
+  expect(request.request.params.get('q')).toBe('ang');</pre>
+</section>
+
+<section id="race-diagram" data-part="3" data-cue="The race test is">
+  <h2>The race, step by step</h2>
+  <svg width="1640" height="560" viewBox="0 0 1640 560">
+    <defs><marker id="arrow-rc" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <text x="0" y="30" fill="#8ea2c0" font-size="24">The test</text>
+    <rect x="0" y="50" width="250" height="90" rx="14" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="125" y="104" fill="#e8eef8" font-size="23" text-anchor="middle">search('react')</text>
+    <rect x="278" y="50" width="250" height="90" rx="14" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="403" y="104" fill="#e8eef8" font-size="23" text-anchor="middle">advance 250 ms</text>
+    <rect x="556" y="50" width="250" height="90" rx="14" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="681" y="104" fill="#e8eef8" font-size="23" text-anchor="middle">search('angular')</text>
+    <rect x="834" y="50" width="250" height="90" rx="14" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="959" y="104" fill="#e8eef8" font-size="23" text-anchor="middle">advance 250 ms</text>
+    <rect x="1112" y="50" width="250" height="90" rx="14" fill="#0f2233" stroke="#38bdf8" stroke-width="3"/>
+    <text x="1237" y="104" fill="#e8eef8" font-size="23" text-anchor="middle">expect cancelled</text>
+    <rect x="1390" y="50" width="250" height="90" rx="14" fill="#0f2233" stroke="#38bdf8" stroke-width="3"/>
+    <text x="1515" y="104" fill="#e8eef8" font-size="23" text-anchor="middle">flush the fresh one</text>
+    <text x="0" y="215" fill="#8ea2c0" font-size="24">HttpTestingController</text>
+    <line x1="403" y1="145" x2="403" y2="232" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-rc)"/>
+    <rect x="278" y="240" width="250" height="110" rx="14" fill="#121b2f" stroke="#8ea2c0" stroke-width="2" stroke-dasharray="8 6"/>
+    <text x="403" y="285" fill="#e8eef8" font-size="23" text-anchor="middle">GET ?q=react</text>
+    <text x="403" y="322" fill="#8ea2c0" font-size="21" text-anchor="middle">held</text>
+    <line x1="959" y1="145" x2="959" y2="232" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-rc)"/>
+    <rect x="834" y="240" width="250" height="110" rx="14" fill="#121b2f" stroke="#8ea2c0" stroke-width="2" stroke-dasharray="8 6"/>
+    <text x="959" y="285" fill="#e8eef8" font-size="23" text-anchor="middle">GET ?q=angular</text>
+    <text x="959" y="322" fill="#8ea2c0" font-size="21" text-anchor="middle">held</text>
+    <line x1="1237" y1="145" x2="1237" y2="232" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-rc)"/>
+    <rect x="1112" y="240" width="250" height="110" rx="14" fill="#2a1414" stroke="#f87171" stroke-width="2"/>
+    <text x="1237" y="285" fill="#e8eef8" font-size="23" text-anchor="middle">?q=react</text>
+    <text x="1237" y="322" fill="#f87171" font-size="21" text-anchor="middle">cancelled ✕</text>
+    <line x1="1515" y1="145" x2="1515" y2="232" stroke="#4ade80" stroke-width="3" marker-end="url(#arrow-rc)"/>
+    <rect x="1390" y="240" width="250" height="110" rx="14" fill="#0f2233" stroke="#4ade80" stroke-width="2"/>
+    <text x="1515" y="285" fill="#e8eef8" font-size="23" text-anchor="middle">?q=angular</text>
+    <text x="1515" y="322" fill="#4ade80" font-size="21" text-anchor="middle">flushed ✓</text>
+    <text x="0" y="430" fill="#e8eef8" font-size="26">switchMap unsubscribed from the old request, so the stale response can never land.</text>
+    <text x="0" y="490" fill="#8ea2c0" font-size="26">No real network. No sleeping. The same answer every run.</text>
+  </svg>
+</section>
+
+<section id="race-test" data-part="3" data-cue="Notice what it doesn't assert">
+  <h2>Assert what the user and the network see</h2>
+  <div class="file">apps/web/src/app/features/catalog/catalog.store.spec.ts · condensed</div>
+  <pre class="code tight" data-lang="ts" data-mark="4,7,8,9,10">it('drops the slow response for an older query when a newer query is issued', () =&gt; {
+  store.search('react');
+  vi.advanceTimersByTime(250);
+  const stale = http.expectOne((r) =&gt; r.params.get('q') === 'react');
+  store.search('angular');
+  vi.advanceTimersByTime(250);
+  const fresh = http.expectOne((r) =&gt; r.params.get('q') === 'angular');
+  // switchMap unsubscribed from the old request, which cancels it: it can never land.
+  expect(stale.cancelled).toBe(true);
+  fresh.flush(page('Angular Signals in Practice'));
+  expect(store.query()).toBe('angular');
+  expect(store.items().map((c) =&gt; c.title)).toEqual(['Angular Signals in Practice']);
+});</pre>
+  <p class="small muted">Also: "keeps searching after a failed request": a 503 doesn't kill the search box (lesson 03).</p>
+</section>
+
+<!-- ───────────── Time and retries ───────────── -->
+<section id="enroll-spec" data-part="4" data-cue="The same two tools test the enroll button">
+  <h2>Retries and the idempotency key</h2>
+  <div class="file">apps/web/src/app/features/course/enrollment-controller.spec.ts</div>
+  <pre class="code tight" data-lang="ts" data-mark="7,8,11">it('retries a 5xx with the same Idempotency-Key', () =&gt; {
+  controller.enroll('c1');
+  const first = http.expectOne('/api/enrollments');
+  const key = first.request.headers.get('Idempotency-Key');
+  expect(key).toMatch(/^[0-9a-f-]{36}$/);
+
+  first.flush(null, { status: 503, statusText: 'Service Unavailable' });
+  vi.advanceTimersByTime(backoff(1));
+
+  const retry = http.expectOne('/api/enrollments');
+  expect(retry.request.headers.get('Idempotency-Key')).toBe(key);
+  retry.flush(enrollment, { status: 201, statusText: 'Created' });
+  expect(controller.status()).toBe('enrolled');
+});</pre>
+  <p class="small muted">Plus: one request for a double-click · a new key for a new intent · 409 treated as enrolled.</p>
+</section>
+
+<section id="policy" data-part="4" data-cue="There's a design lesson in that second test">
+  <h2>Advance by the policy, test the boundary</h2>
+  <div class="file">apps/web/src/app/features/course/enrollment-controller.ts</div>
+  <pre class="code tight" data-lang="ts" data-mark="2">/** 300 ms, then 600 ms. */
+export const backoff = (retryCount: number) =&gt; 300 * 2 ** (retryCount - 1);</pre>
+  <div class="file">apps/web/src/app/features/reports/job-progress.spec.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2,3,4,6">http.expectOne('/api/jobs/j1').flush(job('running', 30));
+await vi.advanceTimersByTimeAsync(pollDelay(1) - 1);
+http.expectNone('/api/jobs/j1');
+await vi.advanceTimersByTimeAsync(1);
+
+http.expectOne('/api/jobs/j1').flush(job('completed', 100));</pre>
+  <p class="small muted">One millisecond early: nothing. On time: exactly one. Not "eventually".</p>
+</section>
+
+<section id="counter-pure" data-part="4" data-cue="Lesson eight's interceptor spec uses the controller as a counter">
+  <h2>A counter, and a pure function</h2>
+  <div class="file">apps/web/src/app/core/auth/auth.interceptor.spec.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="3,4">backend.expectOne('/api/courses').flush(null, unauthorized);
+backend.expectOne('/api/me/enrollments').flush(null, unauthorized);
+// expectOne fails if the second 401 had started a second refresh.
+backend.expectOne('/api/auth/refresh').flush(session('new-token'));</pre>
+  <div class="file">apps/web/src/app/features/reports/job-progress.spec.ts · parseSse · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,4">const first = parseSse('event: job\nda');
+expect(first.messages).toEqual([]);
+
+const second = parseSse(first.rest + 'ta: {"progress":50}\n\nevent: jo');
+expect(second.messages).toEqual([{ event: 'job', data: '{"progress":50}' }]);</pre>
+  <p class="small muted">Pull the hardest logic into pure functions: two strings, no network, no Angular.</p>
+</section>
+
+<!-- ───────────── Components ───────────── -->
+<section id="text-field-spec" data-part="5" data-cue="Component tests in Coursewright render real templates">
+  <h2>Assert what assistive technology sees</h2>
+  <div class="file">apps/web/src/app/design-system/text-field/text-field.spec.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="4,11,12,13">it('describes the input by its hint, and by its error when there is one', async () =&gt; {
+  const { fixture, element, input } = await render();
+  const hint = element.querySelector('.hint')!;
+  expect(input.getAttribute('aria-describedby')).toBe(hint.id);
+  expect(input.hasAttribute('aria-invalid')).toBe(false);
+
+  fixture.componentInstance.error.set('Enter a valid email address.');
+  await fixture.whenStable();
+
+  const error = element.querySelector('.error')!;
+  expect(input.getAttribute('aria-describedby')?.split(' ')).toEqual([hint.id, error.id]);
+  expect(input.getAttribute('aria-invalid')).toBe('true');
+  expect(error.getAttribute('role')).toBeNull();
+  // …</pre>
+</section>
+
+<section id="login-spec" data-part="5" data-cue="The login page spec finds each input by its label text">
+  <h2>Find inputs the way a user does</h2>
+  <div class="file">apps/web/src/app/features/login/login-page.spec.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2,3,5">function type(element: HTMLElement, label: string, value: string) {
+  const labelElement = [...element.querySelectorAll('label')].find(
+    (l) =&gt; l.textContent?.trim() === label,
+  )!;
+  const input = element.querySelector&lt;HTMLInputElement&gt;(`#${labelElement.htmlFor}`)!;
+  input.value = value;
+  input.dispatchEvent(new Event('input'));
+}</pre>
+  <pre class="code tight" data-lang="ts" data-mark="1">it.each(['//evil.example', '/\\evil.example', 'https://evil.example/login', 'catalog', '', null])(
+  'rejects %j (open-redirect guard)',
+  (url) =&gt; expect(safeReturnUrl(url)).toBe('/catalog'),
+);</pre>
+</section>
+
+<!-- ───────────── BFF integration ───────────── -->
+<section id="helpers" data-part="6" data-cue="Now the BFF. Open apps/bff/test/helpers.ts">
+  <h2>The real app, a little faster</h2>
+  <div class="file">apps/bff/test/helpers.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,3">/** An app whose report jobs take milliseconds instead of seconds. */
+export function buildTestApp(options: AppOptions = {}): Promise&lt;FastifyInstance&gt; {
+  return buildApp({ jobStepMs: 2, retryBaseMs: 2, ...options });
+}
+// …
+export async function login(app: FastifyInstance, username: string): Promise&lt;TestSession&gt; {
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/auth/login',
+    payload: { username, password: SEED_PASSWORD },
+  });
+  // …</pre>
+  <p class="small muted">Each test file builds its own app: a freshly seeded in-memory database, and no state shared between files.</p>
+</section>
+
+<section id="inject" data-part="6" data-cue="Tests call the app through app.inject">
+  <h2>No mocks of the thing under test</h2>
+  <div class="cols">
+    <div class="card modern">
+      <h3>app.inject gives</h3>
+      <ul>
+        <li>Status codes and headers</li>
+        <li>Cookies and content types</li>
+        <li>All without a socket</li>
+      </ul>
+    </div>
+    <div class="card modern">
+      <h3>All real</h3>
+      <ul>
+        <li>Routes and validation</li>
+        <li>Auth hooks</li>
+        <li>SQL, on SQLite in memory</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="replay-test" data-part="6" data-cue="A few tests show what that buys">
+  <h2>Idempotency, proved against the database</h2>
+  <div class="file">apps/bff/test/enrollments.test.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="7,8,11">it('enrolls once, and replays the same response for a retry with the same key', async () =&gt; {
+  const created = await enroll('crs-acme-001', 'key-retry-0001');
+  expect(created.statusCode).toBe(201);
+  expect(created.headers['idempotency-replayed']).toBeUndefined();
+  // …
+  const replayed = await enroll('crs-acme-001', 'key-retry-0001');
+  expect(replayed.headers['idempotency-replayed']).toBe('true');
+  expect(replayed.body).toBe(created.body);
+
+  const items = await myEnrollments();
+  expect(items.filter(({ courseId }) =&gt; courseId === 'crs-acme-001')).toHaveLength(1);
+});</pre>
+</section>
+
+<section id="keyset-test" data-part="6" data-cue="The keyset test walks every course">
+  <h2>Every course, exactly once</h2>
+  <div class="file">apps/bff/test/courses.test.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="11,12,13">it('walks every course exactly once, in title order', async () =&gt; {
+  const walked: CourseSummary[] = [];
+  let query: Record&lt;string, string&gt; | undefined = { limit: '7' };
+  while (query) {
+    const { page } = await search(acme, query);
+    expect(page.items.length).toBeLessThanOrEqual(7);
+    walked.push(...page.items);
+    query = page.nextCursor ? { limit: '7', cursor: page.nextCursor } : undefined;
+  }
+  // …
+  expect(new Set(ids).size).toBe(40); // all 40 courses, no duplicates
+  expect(ids).toEqual(onePage.items.map(({ id }) =&gt; id)); // no gaps, and the same order
+  expect(titles).toEqual([...titles].sort());
+});</pre>
+  <p class="small muted">The report tests wait with expect.poll, not sleep. The SSE test listens on a real port.</p>
+</section>
+
+<!-- ───────────── Contract test ───────────── -->
+<section id="contract" data-part="7" data-cue="Open apps/bff/test/contract.test.ts">
+  <h2>Real responses against openapi.yaml</h2>
+  <div class="file">apps/bff/test/contract.test.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,4,6,7,9,10,14">// OpenAPI 3.1 schemas are JSON Schema 2020-12, so the Ajv 2020 build reads them as they are.
+const ajv = new Ajv2020({ allErrors: true, allowUnionTypes: true });
+// …
+/** Fails unless this status, content type and body are all documented for the operation. */
+function expectToMatchContract(
+  // …
+  const documented = documentedResponse(method, path, response.statusCode);
+  expect(documented, `${label} is not in the contract`).toBeDefined();
+  // …
+  const schema = documented.content[mediaType]?.schema;
+  expect(schema, `${label} doesn't document ${mediaType}`).toBeDefined();
+
+  const validate = ajv.compile(toSharedRefs(schema) as JsonSchema);
+  const body: unknown = mediaType.endsWith('json') ? response.json() : response.body;
+  expect(validate(body), `${label}: ${ajv.errorsText(validate.errors)}`).toBe(true);</pre>
+</section>
+
+<section id="coverage" data-part="7" data-cue="The last test is the clever one">
+  <h2>Every documented response, exercised</h2>
+  <div class="file">apps/bff/test/contract.test.ts · expectCall · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="3">expect(response.statusCode, `${method.toUpperCase()} ${url}: ${response.body}`).toBe(status);
+expectToMatchContract(response, method, path);
+exercised.add(`${method} ${path} ${status}`);</pre>
+  <div class="file">apps/bff/test/contract.test.ts</div>
+  <pre class="code tight" data-lang="ts" data-mark="7">it('covers every response the contract documents', () =&gt; {
+  const documented = Object.entries(contract.paths).flatMap(([path, operations]) =&gt;
+    Object.entries(operations as Record&lt;string, Operation&gt;).flatMap(([method, { responses }]) =&gt;
+      Object.keys(responses).map((status) =&gt; `${method} ${path} ${status}`),
+    ),
+  );
+  expect([...exercised].sort()).toEqual(documented.sort());
+});</pre>
+</section>
+
+<section id="ts-vs-contract" data-part="7" data-cue="What does that catch that TypeScript can't?">
+  <h2>What TypeScript can't see</h2>
+  <div class="cols">
+    <div class="card legacy">
+      <h3 class="amber">TypeScript: what the code claims</h3>
+      <ul>
+        <li>A row cast with as: compiles</li>
+        <li>A field JSON.stringify drops: compiles</li>
+        <li>null where a string is promised: compiles</li>
+      </ul>
+    </div>
+    <div class="card modern">
+      <h3>The contract test: the real bytes</h3>
+      <ul>
+        <li>Documented status, content type, body</li>
+        <li>No extra properties (additionalProperties: false)</li>
+        <li>Every documented response exercised</li>
+      </ul>
+    </div>
+  </div>
+  <p class="small muted" style="margin-top:36px">The contract itself, and how the web app uses its types: lesson 07.</p>
+</section>
+
+<!-- ───────────── End-to-end ───────────── -->
+<section id="playwright-config" data-part="8" data-cue="Open apps/web/playwright.config.ts">
+  <h2>Its own servers, fresh data, zero retries</h2>
+  <div class="file">apps/web/playwright.config.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,2,8,11,13">// E2E runs its own BFF and web server on separate ports, so it never collides
+// with `pnpm dev` and always starts from a freshly seeded in-memory database.
+const BFF_PORT = 3100;
+const WEB_PORT = 4300;
+// …
+fullyParallel: false,
+forbidOnly: isCI,
+retries: 0,
+workers: 1,
+// …
+trace: 'retain-on-failure',
+// …
+reuseExistingServer: false,</pre>
+</section>
+
+<section id="journeys" data-part="8" data-cue="The eight tests are journeys, not pages">
+  <h2>Eight tests</h2>
+  <ul class="small">
+    <li>a learner finds a course, enrolls once despite a double-click, and stays signed in across a reload</li>
+    <li>opening a protected page signed out goes to sign-in, then back to that page</li>
+    <li>a wrong password shows an accessible error</li>
+    <li>a manager exports a report that fails once, retries, completes and downloads</li>
+    <li>reports are hidden from learners</li>
+    <li>the sign-in page has no serious accessibility violations</li>
+    <li>the catalog, course and reports pages have no serious accessibility violations</li>
+    <li>keyboard users can skip straight to the main content</li>
+  </ul>
+</section>
+
+<section id="axe" data-part="8" data-cue="The accessibility helper in the end-to-end support file">
+  <h2>axe, with a threshold</h2>
+  <div class="file">apps/web/e2e/support.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,4,7">/** Fails on serious or critical WCAG 2.2 AA violations; minor ones don't block. */
+export async function expectNoSeriousA11yViolations(page: Page): Promise&lt;void&gt; {
+  const results = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+    .analyze();
+  const blocking = results.violations
+    .filter((v) =&gt; v.impact === 'serious' || v.impact === 'critical')
+    .map((v) =&gt; `${v.id}: ${v.help} (${v.nodes.map((n) =&gt; n.target.join(' ')).join(', ')})`);
+  expect(blocking).toEqual([]);
+}</pre>
+  <p class="small muted">What automated checks can and can't prove: lesson 05.</p>
+</section>
+
+<section id="queries" data-part="8" data-cue="Two habits keep them stable">
+  <h2>Roles and labels, and no sleeps</h2>
+  <div class="file">apps/web/e2e/learner-journey.spec.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,2,3,7,8,9">await page.getByLabel('Search courses').fill('signals');
+const results = page.getByRole('list', { name: 'Courses' });
+const courseLink = results.getByRole('link', { name: 'Angular Signals in Practice' });
+await expect(courseLink).toBeVisible();
+await expect(page).toHaveURL(/[?&amp;]q=signals/);
+// …
+await page.getByRole('button', { name: 'Enroll' }).dblclick();
+await expect(page.getByText("You're enrolled")).toBeVisible();
+expect(idempotencyKeys).toHaveLength(1);</pre>
+  <p class="small muted">Web-first assertions retry until they pass or time out. The slow export raises its timeout to 15 s instead of sleeping.</p>
+</section>
+
+<section id="no-retries" data-part="8" data-cue="Why no retries?">
+  <div class="kicker">retries: 0</div>
+  <p class="quote">A retry turns an intermittent bug into a <span class="amber">green build</span>.</p>
+  <p class="muted" style="margin-top:48px">Flaky tests are bugs, in the test or in the app.</p>
+</section>
+
+<section id="ci-order" data-part="8" data-cue="And in .github/workflows/ci.yml">
+  <h2>E2E runs last, cheapest checks first</h2>
+  <div class="steps">
+    <div class="step on"><span class="num">1</span>Install, frozen lockfile</div>
+    <div class="step on"><span class="num">2</span>Contract drift</div>
+    <div class="step on"><span class="num">3</span>Lint, with boundaries</div>
+    <div class="step on"><span class="num">4</span>Unit + integration + contract</div>
+    <div class="step on"><span class="num">5</span>Build, with budgets</div>
+    <div class="step"><span class="num">6</span>E2E + axe: needs verify</div>
+  </div>
+  <div class="file" style="margin-top:36px">.github/workflows/ci.yml · the Playwright report is uploaded even when tests fail</div>
+</section>
+
+<!-- ───────────── Flaky and fast ───────────── -->
+<section id="flaky" data-part="9" data-cue="When an end-to-end test fails one run in twenty">
+  <h2>One run in twenty: the process</h2>
+  <svg width="1640" height="440" viewBox="0 0 1640 440">
+    <defs><marker id="arrow-fl" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="0" y="40" width="360" height="150" rx="16" fill="#121b2f" stroke="#38bdf8" stroke-width="3"/>
+    <text x="180" y="100" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">1 · Reproduce</text>
+    <text x="180" y="140" fill="#8ea2c0" font-size="21" text-anchor="middle">loop it: --repeat-each</text>
+    <text x="180" y="170" fill="#8ea2c0" font-size="21" text-anchor="middle">tracing on; read the trace</text>
+    <line x1="365" y1="115" x2="415" y2="115" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-fl)"/>
+    <rect x="425" y="40" width="380" height="150" rx="16" fill="#121b2f" stroke="#38bdf8" stroke-width="3"/>
+    <text x="615" y="100" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">2 · Classify</text>
+    <text x="615" y="140" fill="#8ea2c0" font-size="21" text-anchor="middle">the test, the app,</text>
+    <text x="615" y="170" fill="#8ea2c0" font-size="21" text-anchor="middle">or the environment?</text>
+    <line x1="810" y1="115" x2="860" y2="115" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-fl)"/>
+    <rect x="870" y="40" width="360" height="150" rx="16" fill="#0f2233" stroke="#4ade80" stroke-width="2"/>
+    <text x="1050" y="100" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">3 · Fix the cause</text>
+    <text x="1050" y="140" fill="#8ea2c0" font-size="21" text-anchor="middle">and pin a race with</text>
+    <text x="1050" y="170" fill="#8ea2c0" font-size="21" text-anchor="middle">a lower-level test</text>
+    <line x1="1235" y1="115" x2="1285" y2="115" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-fl)"/>
+    <rect x="1295" y="40" width="345" height="150" rx="16" fill="#221b0d" stroke="#f5b544" stroke-width="2"/>
+    <text x="1467" y="100" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">Quarantine?</text>
+    <text x="1467" y="140" fill="#8ea2c0" font-size="21" text-anchor="middle">only with an owner</text>
+    <text x="1467" y="170" fill="#8ea2c0" font-size="21" text-anchor="middle">and a date</text>
+    <text x="0" y="260" fill="#e8eef8" font-size="26">Test bugs: a fixed wait, a locator that matches two elements, state shared between tests.</text>
+    <text x="0" y="305" fill="#e8eef8" font-size="26">App bugs: a real race that users will hit too.</text>
+    <rect x="0" y="345" width="1640" height="80" rx="16" fill="#2a1414" stroke="#f87171" stroke-width="2"/>
+    <text x="820" y="396" fill="#e8eef8" font-size="27" text-anchor="middle">Never: add retries to make it go green.</text>
+  </svg>
+</section>
+
+<section id="fast" data-part="9" data-cue="To keep a suite fast as the product grows">
+  <h2>Keeping E2E under ten minutes</h2>
+  <ul>
+    <li>Only critical journeys at the top; edge cases down the pyramid</li>
+    <li>Set up state through the API, not the UI</li>
+    <li>Data per worker (a tenant each), then run in parallel</li>
+    <li>Shard across CI machines</li>
+    <li>Affected journeys per pull request; everything nightly</li>
+  </ul>
+</section>
+
+<section id="storage-state" data-part="9" data-cue="One Coursewright detail is worth raising here">
+  <h2>A saved sign-in meets rotation</h2>
+  <svg width="1640" height="440" viewBox="0 0 1640 440">
+    <defs><marker id="arrow-ss2" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="0" y="150" width="380" height="130" rx="16" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="190" y="205" fill="#e8eef8" font-size="27" text-anchor="middle">Saved sign-in</text>
+    <text x="190" y="245" fill="#8ea2c0" font-size="22" text-anchor="middle">refresh cookie R1</text>
+    <path d="M385,190 C470,150 520,90 610,90" fill="none" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-ss2)"/>
+    <path d="M385,240 C470,280 520,340 610,340" fill="none" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-ss2)"/>
+    <rect x="620" y="30" width="1020" height="120" rx="16" fill="#0f2233" stroke="#4ade80" stroke-width="2"/>
+    <text x="650" y="82" fill="#e8eef8" font-size="27">Test A: page load restores with R1</text>
+    <text x="650" y="122" fill="#4ade80" font-size="23">200 · R1 spent, the context gets R2</text>
+    <rect x="620" y="280" width="1020" height="120" rx="16" fill="#2a1414" stroke="#f87171" stroke-width="2"/>
+    <text x="650" y="332" fill="#e8eef8" font-size="27">Test B: a new context restores with R1 again</text>
+    <text x="650" y="372" fill="#f87171" font-size="23">401 · R1 reused: every session revoked, back to sign-in</text>
+  </svg>
+  <p class="muted">With rotation, a saved refresh cookie works exactly once. Sign in through the API per test, or per worker and user.</p>
+</section>
+
+<!-- ───────────── What goes where ───────────── -->
+<section id="where" data-part="10" data-cue="Put it together for the enroll feature">
+  <h2>Enrolment: each fact tested once</h2>
+  <table>
+    <tr><th>Level</th><th>Owns</th><th>In Coursewright</th></tr>
+    <tr><td>Unit (web)</td><td>Client policy: one request per double-click; retry a 503 with the same key; new intent, new key; 409 = enrolled</td><td>enrollment-controller.spec.ts</td></tr>
+    <tr><td>Integration</td><td>Server truth: 201, replay, 422, 409, 400, cross-tenant 404, against a real database; every shape</td><td>enrollments.test.ts, contract.test.ts</td></tr>
+    <tr><td>E2E</td><td>One journey: a real double-click, exactly one POST with a key, "You're enrolled"</td><td>learner-journey.spec.ts</td></tr>
+  </table>
+</section>
+
+<!-- ───────────── Production ───────────── -->
+<section id="production" data-part="11" data-cue="Today the end-to-end suite runs on one worker">
+  <h2>What production would add</h2>
+  <ul class="small">
+    <li>A tenant per worker, then fullyParallel and more workers</li>
+    <li>Sharded Playwright across CI machines</li>
+    <li>failOnFlakyTests, so a flake fails the run even with retries (check your version)</li>
+    <li>Component tests and visual regression in Storybook</li>
+    <li>Test data builders instead of hand-written objects</li>
+    <li>Mutation testing on core logic, such as the auth store</li>
+  </ul>
+</section>
+
+<!-- ───────────── Traps ───────────── -->
+<section id="traps" data-part="12" data-cue="Sleeping in tests">
+  <h2>Traps</h2>
+  <ul class="small">
+    <li>Sleeping in tests</li>
+    <li>Letting real timers and networks decide the order of a race</li>
+    <li>Asserting implementation instead of what the user and network see</li>
+    <li>Mocking the thing under test</li>
+    <li>Retries in the E2E configuration</li>
+    <li>Querying by CSS class or test id when a role and name would do</li>
+    <li>One E2E test per edge case</li>
+  </ul>
+</section>
+
+<!-- ───────────── Interview drill ───────────── -->
+<section id="drill" data-part="13" data-cue="Let's practise">
+  <div class="kicker">Interview drill</div>
+  <h1>Five questions</h1>
+  <p class="lead">After each question, pause and answer out loud. Then compare with the model answer.</p>
+</section>
+
+<section id="q1" data-part="13" data-cue="What goes in a unit test, an integration test and an end-to-end test for the enroll feature?" data-voice="interviewer">
+  <div class="kicker">Question 1 of 5</div>
+  <p class="question">What goes in a unit test, an integration test and an end-to-end test for the enroll feature?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a1" data-part="13" data-cue="Unit tests own the client's policy">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Unit: a double-click sends one request</li>
+    <li>Unit: 503 → retry, same key; new intent, new key; 409 = enrolled</li>
+    <li>Integration: 201, replay, 422, 409, 400, 404, real database</li>
+    <li>The contract test on every shape</li>
+    <li>E2E: one real double-click → exactly one POST</li>
+  </ul>
+</section>
+
+<section id="q2" data-part="13" data-cue="How do you test a race condition deterministically?" data-voice="interviewer">
+  <div class="kicker">Question 2 of 5</div>
+  <p class="question">How do you test a race condition deterministically?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a2" data-part="13" data-cue="Take control of what the race depends on">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Control time and order</li>
+    <li>Fake timers own the clock</li>
+    <li>HttpTestingController holds requests; flush in any order</li>
+    <li>Old query, new query: stale cancelled, flush the fresh one</li>
+    <li>No network, no sleep; behaviour, not operators</li>
+  </ul>
+</section>
+
+<section id="q3" data-part="13" data-cue="An end-to-end test fails one run in twenty. What's your process?" data-voice="interviewer">
+  <div class="kicker">Question 3 of 5</div>
+  <p class="question">An E2E test fails one run in twenty. What's your process?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a3" data-part="13" data-cue="Treat it as a bug, not noise">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>A bug, not noise</li>
+    <li>Reproduce in a loop, tracing on</li>
+    <li>Classify: the test, the app, or the environment</li>
+    <li>Fix the cause; retries stay at zero</li>
+    <li>Quarantine only with an owner and a date</li>
+  </ul>
+</section>
+
+<section id="q4" data-part="13" data-cue="How do you keep an end-to-end suite under ten minutes as the product grows?" data-voice="interviewer">
+  <div class="kicker">Question 4 of 5</div>
+  <p class="question">How do you keep an E2E suite under ten minutes as the product grows?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a4" data-part="13" data-cue="Keep only critical journeys at the top">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Critical journeys only; edge cases lower down</li>
+    <li>Set up data through the API</li>
+    <li>Data per worker → parallel → sharded</li>
+    <li>Affected journeys per PR, everything nightly</li>
+    <li>Rotating cookies: sign in per test, not one saved state</li>
+  </ul>
+</section>
+
+<section id="q5" data-part="13" data-cue="What does the contract test catch that TypeScript can't?" data-voice="interviewer">
+  <div class="kicker">Question 5 of 5</div>
+  <p class="question">What does the contract test catch that TypeScript can't?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a5" data-part="13" data-cue="The contract test checks what the server actually sends">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>TypeScript checks claims at compile time</li>
+    <li>The contract test checks the real responses</li>
+    <li>Status, content type and body against openapi.yaml</li>
+    <li>Casts, dropped fields, nulls, undocumented statuses</li>
+    <li>Fails if a documented response is never exercised</li>
+  </ul>
+</section>
+
+<!-- ───────────── Recap ───────────── -->
+<template id="recap">
+  <h2>Five things to remember</h2>
+  <ol class="recap">
+    <li class="item">Three levels, each owning different facts.</li>
+    <li class="item">Own time and order: fake timers and the HTTP testing controller.</li>
+    <li class="item">Test behaviour; pull hard logic into pure functions.</li>
+    <li class="item">The contract test checks real responses, and every documented one.</li>
+    <li class="item">E2E: roles and labels, no sleeps, fresh data, zero retries.</li>
+  </ol>
+</template>
+<section id="recap-0" data-part="14" data-cue="Five things to remember" data-template="recap" data-show="0"></section>
+<section id="recap-1" data-part="14" data-cue="One: three levels, each owning different facts" data-template="recap" data-show="1"></section>
+<section id="recap-2" data-part="14" data-cue="Two: races and retries become deterministic" data-template="recap" data-show="2"></section>
+<section id="recap-3" data-part="14" data-cue="Three: test behaviour" data-template="recap" data-show="3"></section>
+<section id="recap-4" data-part="14" data-cue="Four: the contract test checks real responses" data-template="recap" data-show="4"></section>
+<section id="recap-5" data-part="14" data-cue="Five: end-to-end tests query by role and label" data-template="recap" data-show="5"></section>
+
+<section id="next" data-part="14" data-cue="In the next lesson">
+  <div class="kicker">Next</div>
+  <h1>11 · CI/CD and Frontend Observability</h1>
+  <p class="lead">How the pipeline is ordered, how a deploy rolls out safely, and how one trace ID connects a click to a log line.</p>
+</section>
+
+<script src="../assets/slides.js"></script>
+</body>
+</html>

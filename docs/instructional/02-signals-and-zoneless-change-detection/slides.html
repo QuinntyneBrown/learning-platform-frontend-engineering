@@ -1,0 +1,669 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 02 Slides</title>
+<!--
+  Slides for the lesson 02 video. Each <section> is one slide. data-cue is a phrase from script.md:
+  tools/instructional-video/build.cs shows the slide from the moment the narration reaches that phrase.
+  Open this file in a browser and use the arrow keys to step through the deck.
+-->
+<link rel="stylesheet" href="../assets/slides.css">
+</head>
+<body data-lesson-number="02" data-lesson-title="Signals and Zoneless Change Detection" data-parts="Introduction|The questions|What zone.js did|What schedules a render|Signals and computed|The catalog store|linkedSignal|Resources|Effects|When not to use a store|Trade-offs|Traps|Interview drill|Recap">
+
+<!-- ───────────── Intro ───────────── -->
+<section id="title" data-part="0">
+  <div class="kicker">Coursewright frontend · Lesson 02</div>
+  <h1>Signals and Zoneless<br>Change Detection</h1>
+  <p class="lead">What makes the screen update when there's no zone.js, and where state should live: a signal, a resource, a service or a store.</p>
+</section>
+
+<!-- ───────────── Questions ───────────── -->
+<section id="questions" data-part="1" data-cue="The questions this lesson answers">
+  <h2>The questions this lesson answers</h2>
+  <ul>
+    <li>How do signals change change detection in a zoneless app?</li>
+    <li>When is an effect the wrong tool?</li>
+    <li>When would you not use a store?</li>
+    <li>Why is the search box a linkedSignal, not a computed?</li>
+    <li>When would you use httpResource rather than an RxJS pipeline?</li>
+  </ul>
+</section>
+
+<section id="thesis" data-part="1" data-cue="Keep one sentence in your head while you listen">
+  <div class="kicker">The thesis</div>
+  <p class="quote">Without zone.js, Angular renders only when it's <span class="accent">told</span>. A signal is the most precise way to tell it.</p>
+  <p class="muted" style="margin-top:48px">It says what changed, and which views read it.</p>
+</section>
+
+<!-- ───────────── What zone.js did ───────────── -->
+<section id="zone-old" data-part="2" data-cue="Start with what went away">
+  <h2>What zone.js used to do</h2>
+  <div class="steps">
+    <div class="step"><span class="num">1</span>Patch timers, promises, events, XHR</div>
+    <div class="step"><span class="num">2</span>A callback finishes</div>
+    <div class="step"><span class="num">3</span>The zone tells Angular</div>
+    <div class="step on"><span class="num">4</span>Check the whole tree, root down</div>
+  </div>
+  <p class="muted" style="margin-top:48px">It had no idea what changed, so it checked everything.</p>
+</section>
+
+<section id="zone-costs" data-part="2" data-cue="That made plain class fields work by accident">
+  <h2>Convenient, and expensive</h2>
+  <div class="cols">
+    <div class="card legacy">
+      <h3 class="amber">Worked by accident</h3>
+      <p>Assign a plain field in a subscribe callback, and the zone noticed.</p>
+    </div>
+    <div class="card legacy">
+      <h3 class="amber">The costs</h3>
+      <ul>
+        <li>A whole-tree check after every async task</li>
+        <li>Patched browser APIs</li>
+        <li>One more library in every bundle</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="app-config" data-part="2" data-cue="Now open apps/web/src/app/app.config.ts">
+  <h2>No zone in Coursewright</h2>
+  <div class="file">apps/web/src/app/app.config.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1">// Zoneless is the default: there is no zone.js, and signals and template events schedule rendering.
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideBrowserGlobalErrorListeners(),
+    { provide: ErrorHandler, useClass: GlobalErrorHandler },
+    // …
+  ],
+};</pre>
+  <p class="small muted">No zone provider in the config, and zone.js isn't a dependency of the web app.</p>
+</section>
+
+<section id="defaults" data-part="2" data-cue="As of September 2026, the repo's comments and ADR-0004 say">
+  <h2>The defaults, as the repo states them</h2>
+  <div class="cols">
+    <div class="card modern"><h3>Zoneless by default</h3><p>app.config.ts and ADR-0004: "Angular 22 is zoneless by default".</p></div>
+    <div class="card modern"><h3>OnPush by default</h3><p>ADR-0004 and shell.ts. The installed type declarations agree.</p></div>
+  </div>
+  <p class="amber small" style="margin-top:40px">As of September 2026. Check this for your version.</p>
+</section>
+
+<!-- ───────────── What schedules a render ───────────── -->
+<template id="triggers">
+  <h2>What schedules a render now</h2>
+  <div class="cols">
+    <div class="card modern item">
+      <h3>Schedules a render</h3>
+      <ul class="small">
+        <li>A signal read by a template changes</li>
+        <li>A template or host listener fires</li>
+        <li>markForCheck() (the async pipe calls it)</li>
+        <li>ComponentRef.setInput() (router, tests)</li>
+        <li>A view is attached or removed</li>
+      </ul>
+    </div>
+    <div class="card legacy item">
+      <h3 class="amber">Renders nothing on its own</h3>
+      <ul class="small">
+        <li>A setTimeout finishing</li>
+        <li>A promise resolving</li>
+        <li>A subscribe callback assigning a plain field</li>
+      </ul>
+    </div>
+  </div>
+</template>
+<section id="triggers-1" data-part="3" data-cue="So what does schedule a render?" data-template="triggers" data-highlight="1"></section>
+<section id="triggers-2" data-part="3" data-cue="Just as important is what isn't on the list" data-template="triggers" data-highlight="2"></section>
+
+<section id="catalog-walk" data-part="3" data-cue="Walk the catalog page to see the list in action">
+  <h2>The catalog page, trigger by trigger</h2>
+  <div class="file">apps/web/src/app/features/catalog/catalog-page.html · excerpt</div>
+  <pre class="code tight" data-lang="html" data-mark="3">&lt;input
+  …
+  (input)="onSearch(searchBox.value)"
+/&gt;
+&lt;p class="status" role="status"&gt;{{ statusText() }}&lt;/p&gt;</pre>
+  <div class="file">apps/web/src/app/features/catalog/catalog.store.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2">tap(({ items, nextCursor }) =&gt;
+  patchState(store, { items, nextCursor, status: 'loaded' }),
+),</pre>
+  <p class="small muted">A template listener on the way in; a signal write on the way back. The network callback itself triggers nothing.</p>
+</section>
+
+<section id="narrow" data-part="3" data-cue="Signals also make the render narrow">
+  <h2>Signals make the render narrow</h2>
+  <svg width="1640" height="560" viewBox="0 0 1640 560">
+    <defs><marker id="arrow-n" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#38bdf8"/></marker></defs>
+    <line x1="1050" y1="110" x2="710" y2="220" stroke="#22304d" stroke-width="4"/>
+    <line x1="1050" y1="110" x2="1310" y2="220" stroke="#f5b544" stroke-width="4"/>
+    <line x1="1310" y1="330" x2="1030" y2="430" stroke="#22304d" stroke-width="4"/>
+    <line x1="1310" y1="330" x2="1430" y2="430" stroke="#22304d" stroke-width="4"/>
+    <rect x="860" y="0" width="380" height="110" rx="18" fill="#121b2f" stroke="#f5b544" stroke-width="3" stroke-dasharray="10 8"/>
+    <text x="1050" y="48" fill="#e8eef8" font-size="30" font-weight="600" text-anchor="middle">Shell · on push</text>
+    <text x="1050" y="86" fill="#f5b544" font-size="22" text-anchor="middle">walked through, not re-checked</text>
+    <rect x="540" y="220" width="340" height="110" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="710" y="268" fill="#8ea2c0" font-size="28" text-anchor="middle">Button · Sign out</text>
+    <text x="710" y="306" fill="#8ea2c0" font-size="22" text-anchor="middle">skipped</text>
+    <rect x="1100" y="220" width="420" height="110" rx="18" fill="#0f2233" stroke="#38bdf8" stroke-width="4"/>
+    <text x="1310" y="268" fill="#e8eef8" font-size="30" font-weight="600" text-anchor="middle">CatalogPage</text>
+    <text x="1310" y="306" fill="#38bdf8" font-size="22" text-anchor="middle">marked dirty · refreshed</text>
+    <rect x="830" y="430" width="400" height="110" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="1030" y="478" fill="#8ea2c0" font-size="28" text-anchor="middle">Button · Load more</text>
+    <text x="1030" y="516" fill="#8ea2c0" font-size="22" text-anchor="middle">skipped if its inputs didn't change</text>
+    <rect x="1260" y="430" width="340" height="110" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="1430" y="478" fill="#8ea2c0" font-size="28" text-anchor="middle">MyEnrollments</text>
+    <text x="1430" y="516" fill="#8ea2c0" font-size="22" text-anchor="middle">skipped</text>
+    <rect x="0" y="430" width="440" height="110" rx="18" fill="#121b2f" stroke="#1f5f7f" stroke-width="3"/>
+    <text x="220" y="478" fill="#e8eef8" font-size="30" font-weight="600" text-anchor="middle">store.items()</text>
+    <text x="220" y="516" fill="#8ea2c0" font-size="22" text-anchor="middle">a signal changes</text>
+    <line x1="440" y1="470" x2="1092" y2="300" stroke="#38bdf8" stroke-width="4" marker-end="url(#arrow-n)"/>
+    <text x="470" y="530" fill="#38bdf8" font-size="24">read by its template</text>
+  </svg>
+  <p class="small muted" style="margin-top:12px"><span class="accent">Refreshed</span> · <span class="amber">ancestor: has a child to refresh</span> · skipped</p>
+</section>
+
+<section id="onpush" data-part="3" data-cue="Every component in Coursewright still declares on push">
+  <h2>OnPush, written out anyway</h2>
+  <div class="file">apps/web/src/app/shell/shell.ts · excerpt</div>
+  <pre class="code" data-lang="ts" data-mark="3">  // OnPush is already the default in v22; the house rule is to write it out anyway, so the
+  // intent survives copy-paste into older code and is obvious in review.
+  changeDetection: ChangeDetectionStrategy.OnPush,</pre>
+  <div class="cols">
+    <div class="card modern"><h3>OnPush</h3><p>Checked when marked: a signal, a listener, an input.</p></div>
+    <div class="card legacy"><h3 class="amber">Default → Eager</h3><p>Check-always is deprecated in favour of <span class="accent">Eager</span>. As of September 2026; check your version.</p></div>
+  </div>
+</section>
+
+<!-- ───────────── Signals and computed ───────────── -->
+<section id="signal-computed" data-part="4" data-cue="A writable signal holds a value you set">
+  <h2>Two building blocks</h2>
+  <div class="cols">
+    <div class="card"><h3>signal()</h3><p>Holds a value you set. Readers are notified when it changes.</p></div>
+    <div class="card modern"><h3>computed()</h3><p>Derived from other signals. Lazy, memoized, glitch-free. Read-only.</p></div>
+  </div>
+  <p class="muted" style="margin-top:40px">Glitch-free: never computed from one new input and one old one.</p>
+</section>
+
+<section id="text-field" data-part="4" data-cue="The design system's text field shows why this matters">
+  <h2>Signals inside a primitive</h2>
+  <div class="file">apps/web/src/app/design-system/text-field/text-field.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,2,8,12">protected readonly value = signal('');
+protected readonly disabled = signal(false);
+protected readonly describedBy = computed(
+  () =&gt;
+    [this.hint() &amp;&amp; this.hintId, this.error() &amp;&amp; this.errorId].filter(Boolean).join(' ') || null,
+);
+// …
+writeValue(value: string | null): void {
+  this.value.set(value ?? '');
+}
+// …
+setDisabledState(disabled: boolean): void {
+  this.disabled.set(disabled);
+}</pre>
+  <p class="small muted">Called by the forms API, not by a template listener. A plain field would leave a stale input.</p>
+</section>
+
+<section id="tf-spec" data-part="4" data-cue="The spec next to it proves it">
+  <h2>The spec proves the render</h2>
+  <div class="file">apps/web/src/app/design-system/text-field/text-field.spec.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="8,9,10">it('reads and writes the form control value', async () =&gt; {
+  const { fixture, input } = await render();
+
+  input.value = 'riley@acme.example';
+  input.dispatchEvent(new Event('input'));
+  expect(fixture.componentInstance.email.value).toBe('riley@acme.example');
+
+  fixture.componentInstance.email.setValue('morgan@acme.example');
+  await fixture.whenStable();
+  expect(input.value).toBe('morgan@acme.example');
+});</pre>
+  <p class="small muted">The test host is OnPush too. No detectChanges() anywhere: wait until stable, then assert.</p>
+</section>
+
+<section id="auth-store" data-part="4" data-cue="The app-wide authentication state has the same shape">
+  <h2>App-wide auth state, as signals</h2>
+  <div class="file">apps/web/src/app/core/auth/auth.store.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,4,5,6">private readonly session = signal&lt;Session | null&gt;(null);
+private refreshInFlight: Observable&lt;Session&gt; | null = null;
+
+readonly user = computed(() =&gt; this.session()?.user ?? null);
+readonly accessToken = computed(() =&gt; this.session()?.accessToken ?? null);
+readonly isAuthenticated = computed(() =&gt; this.session() !== null);
+
+hasRole(role: Role): boolean {
+  return this.user()?.roles.includes(role) ?? false;
+}</pre>
+  <p class="small muted">One private writable signal; a read-only public surface. Refresh mechanics: lesson 08.</p>
+</section>
+
+<section id="shell-reads" data-part="4" data-cue="And the shell's manager check is a">
+  <h2>A method call is still tracked</h2>
+  <div class="file">apps/web/src/app/shell/shell.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2">protected readonly user = this.auth.user;
+protected readonly isManager = computed(() =&gt; this.auth.hasRole('manager'));</pre>
+  <div class="file">apps/web/src/app/shell/shell.html · excerpt</div>
+  <pre class="code tight" data-lang="html" data-mark="1,4">@if (user(); as user) {
+  &lt;nav class="nav" aria-label="Main"&gt;
+    …
+        @if (isManager()) {</pre>
+  <p class="small muted">hasRole() reads the session signal inside a computed, so the computed depends on it.</p>
+</section>
+
+<!-- ───────────── The catalog store ───────────── -->
+<section id="store-state" data-part="5" data-cue="Now the one real store">
+  <h2>The one real store</h2>
+  <div class="file">apps/web/src/app/features/catalog/catalog.store.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="5,10,11">interface CatalogState {
+  query: string;
+  items: CourseSummary[];
+  nextCursor: string | null;
+  status: 'idle' | 'loading' | 'loaded' | 'error';
+  loadingMore: boolean;
+  error: string | null;
+}
+// …
+export const CatalogStore = signalStore(
+  withState(initialState),
+  withMethods((store, api = inject(CoursewrightApi)) =&gt; {</pre>
+  <p class="small muted">A status union: the page can't be loading and in error at once.</p>
+</section>
+
+<section id="patch-state" data-part="5" data-cue="withState turns each field into a signal on the store">
+  <h2>patchState: replace, don't mutate</h2>
+  <div class="file">apps/web/src/app/features/catalog/catalog.store.ts · condensed</div>
+  <pre class="code tight" data-lang="ts" data-mark="3">tap((query) =&gt; patchState(store, { query, status: 'loading', error: null })),
+// …
+patchState(store, { items: [...store.items(), ...items], nextCursor });</pre>
+  <div class="file">apps/web/src/app/features/catalog/catalog-page.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1">providers: [CatalogStore],</pre>
+  <div class="cols">
+    <div class="card legacy"><h3 class="amber">items().push(…)</h3><p>Same reference. Nobody is notified.</p></div>
+    <div class="card modern"><h3>A new array</h3><p>New reference. Every reader updates.</p></div>
+  </div>
+</section>
+
+<section id="status-text" data-part="5" data-cue="The page derives its status line">
+  <h2>Derived, so it can't disagree</h2>
+  <div class="file">apps/web/src/app/features/catalog/catalog-page.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,2">protected readonly statusText = computed(() =&gt; {
+  const { status, items, query, nextCursor, error } = this.store;
+  const count = items().length;
+  switch (status()) {
+    // …
+    case 'loading':
+      return 'Searching…';
+    // …
+    case 'loaded':
+      if (count === 0) return query() ? `No courses match "${query()}"` : 'No courses yet';
+      return `${count}${nextCursor() ? '+' : ''} ${count === 1 ? 'course' : 'courses'} found`;
+  }
+});</pre>
+</section>
+
+<section id="bridge" data-part="5" data-cue="One detail belongs here">
+  <h2>The bridge: state becomes events</h2>
+  <div class="file">apps/web/src/app/features/catalog/catalog-page.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="3">constructor() {
+  // Every change goes to the store, which debounces, trims and de-duplicates it.
+  this.store.search(this.query);
+}</pre>
+  <svg width="1640" height="230" viewBox="0 0 1640 230">
+    <defs><marker id="arrow-b" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="0" y="20" width="350" height="140" rx="18" fill="#121b2f" stroke="#1f5f7f" stroke-width="3"/>
+    <text x="175" y="80" fill="#e8eef8" font-size="30" font-weight="600" text-anchor="middle">query</text>
+    <text x="175" y="120" fill="#8ea2c0" font-size="22" text-anchor="middle">a linkedSignal</text>
+    <line x1="355" y1="90" x2="418" y2="90" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-b)"/>
+    <rect x="430" y="20" width="350" height="140" rx="18" fill="#0f2233" stroke="#38bdf8" stroke-width="3"/>
+    <text x="605" y="80" fill="#e8eef8" font-size="30" font-weight="600" text-anchor="middle">effect</text>
+    <text x="605" y="120" fill="#38bdf8" font-size="22" text-anchor="middle">inside rxMethod</text>
+    <line x1="785" y1="90" x2="848" y2="90" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-b)"/>
+    <rect x="860" y="20" width="350" height="140" rx="18" fill="#121b2f" stroke="#6b5220" stroke-width="3"/>
+    <text x="1035" y="80" fill="#e8eef8" font-size="30" font-weight="600" text-anchor="middle">RxJS pipeline</text>
+    <text x="1035" y="120" fill="#f5b544" font-size="22" text-anchor="middle">debounce · distinct · switchMap</text>
+    <line x1="1215" y1="90" x2="1278" y2="90" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-b)"/>
+    <rect x="1290" y="20" width="350" height="140" rx="18" fill="#121b2f" stroke="#1f5f7f" stroke-width="3"/>
+    <text x="1465" y="80" fill="#e8eef8" font-size="30" font-weight="600" text-anchor="middle">patchState</text>
+    <text x="1465" y="120" fill="#8ea2c0" font-size="22" text-anchor="middle">store signals</text>
+    <text x="175" y="210" fill="#8ea2c0" font-size="24" text-anchor="middle">state</text>
+    <text x="820" y="210" fill="#8ea2c0" font-size="24" text-anchor="middle">events over time (lesson 03)</text>
+    <text x="1465" y="210" fill="#8ea2c0" font-size="24" text-anchor="middle">state</text>
+  </svg>
+</section>
+
+<!-- ───────────── linkedSignal ───────────── -->
+<section id="linked-need" data-part="6" data-cue="That query signal is the interesting one">
+  <h2>The search box needs two things</h2>
+  <div class="cols">
+    <div class="card"><h3>Local and writable</h3><p>Every keystroke sets it, before the URL catches up.</p></div>
+    <div class="card"><h3>Follows the URL</h3><p>Back button or a shared link: the box must show ?q=.</p></div>
+  </div>
+</section>
+
+<section id="linked-code" data-part="6" data-cue="That's what linkedSignal is for">
+  <h2>linkedSignal: writable, and resets</h2>
+  <div class="file">apps/web/src/app/features/catalog/catalog-page.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2,5,8">/** Bound from `?q=`, so a search can be bookmarked, shared, and restored by Back. */
+readonly q = input&lt;string&gt;();
+
+/** The search box's value: local, seeded from the URL, and reset whenever the URL changes. */
+protected readonly query = linkedSignal(() =&gt; this.q() ?? '');
+// …
+protected onSearch(value: string): void {
+  this.query.set(value);
+  // …
+}</pre>
+  <p class="small muted">replaceUrl: lesson 03. Query params as inputs: lesson 04.</p>
+</section>
+
+<section id="linked-alt" data-part="6" data-cue="Compare the alternatives">
+  <h2>Why not the alternatives?</h2>
+  <div class="file">Sketch · not in this repo · the pattern linkedSignal replaces</div>
+  <pre class="code tight" data-lang="ts" data-mark="3">protected readonly query = signal('');
+constructor() {
+  effect(() =&gt; this.query.set(this.q() ?? ''));
+}</pre>
+  <div class="cols3">
+    <div class="card legacy"><h3 class="amber">computed</h3><p>Follows the URL, but read-only.</p></div>
+    <div class="card legacy"><h3 class="amber">signal + effect</h3><p>An extra pass, a stale value in between, a hidden dependency.</p></div>
+    <div class="card modern"><h3>linkedSignal</h3><p>The relationship in one declaration.</p></div>
+  </div>
+</section>
+
+<!-- ───────────── Resources ───────────── -->
+<section id="resource-api" data-part="7" data-cue="Next, loading data">
+  <h2>httpResource: a read as signals</h2>
+  <div class="file">apps/web/src/app/core/api/coursewright-api.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="3">/** A signal-driven GET that refetches when `courseId` changes. Call it from an injection context. */
+course(courseId: () =&gt; string): HttpResourceRef&lt;Course | undefined&gt; {
+  return httpResource&lt;Course&gt;(() =&gt; `/api/courses/${encodeURIComponent(courseId())}`);
+}</pre>
+  <p class="muted">Takes a function, not a string: the URL re-derives when the ID signal changes.</p>
+</section>
+
+<section id="course-page" data-part="7" data-cue="The course page, features/course/course-page.ts, uses it in one line">
+  <h2>One line on the course page</h2>
+  <div class="file">apps/web/src/app/features/course/course-page.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2,4">/** Bound from the `:courseId` route parameter (withComponentInputBinding). */
+readonly courseId = input.required&lt;string&gt;();
+// …
+protected readonly course = this.api.course(this.courseId);
+protected readonly notFound = computed(() =&gt; this.course.statusCode() === 404);
+protected readonly errorMessage = computed(() =&gt; problemMessage(this.course.error()));</pre>
+  <ul class="small">
+    <li>value, error, isLoading, statusCode: all signals</li>
+    <li>A field initializer is an injection context</li>
+    <li>A new courseId refetches; only the latest request counts</li>
+  </ul>
+</section>
+
+<section id="heading" data-part="7" data-cue="Everything else on the page derives from that">
+  <h2>The heading is derived state</h2>
+  <div class="file">apps/web/src/app/features/course/course-page.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,2">// One h1 whose text changes, rather than one h1 per state: route focus lands on it while
+// the course is still loading, and replacing the element would drop that focus.
+protected readonly heading = computed(() =&gt; {
+  if (this.course.hasValue()) return this.course.value().title;
+  if (this.notFound()) return 'Course not found';
+  if (this.course.error()) return 'Course unavailable';
+  return 'Loading course…';
+});</pre>
+  <div class="file">apps/web/src/app/features/course/course-page.html · excerpt</div>
+  <pre class="code tight" data-lang="html">&lt;h1&gt;{{ heading() }}&lt;/h1&gt;</pre>
+</section>
+
+<section id="rx-resource" data-part="7" data-cue="shows the sibling, rxResource">
+  <h2>rxResource: the same shape from an Observable</h2>
+  <div class="file">apps/web/src/app/features/catalog/my-enrollments.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2">// rxResource turns an Observable into signals for value, status and error.
+protected readonly enrollments = rxResource({ stream: () =&gt; this.api.myEnrollments() });</pre>
+  <div class="file">apps/web/src/app/features/catalog/my-enrollments.ts · template, condensed</div>
+  <pre class="code tight" data-lang="html" data-mark="1,4">@if (enrollments.hasValue()) {
+  @let items = enrollments.value().items;
+  …
+} @else if (enrollments.error()) {
+  &lt;p&gt;We couldn't load your enrollments. Reload the page to try again.&lt;/p&gt;
+} @else {
+  &lt;p&gt;Loading your enrollments…&lt;/p&gt;
+}</pre>
+  <p class="small muted">Both go through HttpClient, so the interceptors apply either way.</p>
+</section>
+
+<section id="stability" data-part="7" data-cue="As of September 2026, ADR-0004 says httpResource is stable">
+  <h2>Stable, as of this writing</h2>
+  <div class="card modern">
+    <p>ADR-0004: "Simple reads use httpResource, which is stable in v22."</p>
+    <p class="muted" style="margin:0">The installed Angular 22 type declarations mark httpResource and rxResource as public API since 22.0.</p>
+  </div>
+  <p class="amber small" style="margin-top:40px">Experimental for several releases. As of September 2026; check your version.</p>
+</section>
+
+<section id="reads-only" data-part="7" data-cue="One rule: resources are for reads">
+  <h2>Resources are for reads</h2>
+  <div class="cols">
+    <div class="card modern"><h3>Resource</h3><p>GET a course, list enrollments. Re-runs when its inputs change.</p></div>
+    <div class="card legacy"><h3 class="amber">Not for a POST</h3><p>Enrolling must not run twice. It's an RxJS pipeline: lesson 03.</p></div>
+  </div>
+</section>
+
+<!-- ───────────── Effects ───────────── -->
+<section id="effect-def" data-part="8" data-cue="That leaves effects">
+  <div class="kicker">Effects</div>
+  <p class="quote">An effect pushes signal state into something that <span class="accent">isn't a signal</span>.</p>
+  <p class="muted" style="margin-top:48px">It runs asynchronously, during change detection, not when the signal is set.</p>
+</section>
+
+<section id="title-effect" data-part="8" data-cue="The course page has two legitimate ones">
+  <h2>Effect 1: the document title</h2>
+  <div class="file">apps/web/src/app/features/course/course-page.ts · excerpt</div>
+  <pre class="code" data-lang="ts" data-mark="5">constructor() {
+  // The route's title is only "Course"; once loaded, the browser tab names the course.
+  effect(() =&gt; {
+    if (this.course.hasValue()) {
+      this.title.setTitle(`${this.course.value().title} · Coursewright`);
+    }
+  });
+  // …
+}</pre>
+  <p class="small muted">document.title isn't a signal, so an effect is the bridge.</p>
+</section>
+
+<section id="after-render" data-part="8" data-cue="The second is an afterRenderEffect">
+  <h2>Effect 2: focus, after the DOM exists</h2>
+  <div class="file">apps/web/src/app/features/course/course-page.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,6">private readonly enrolledStatus = viewChild&lt;ElementRef&lt;HTMLElement&gt;&gt;('enrolledStatus');
+// …
+// The Enroll button had focus and has just been removed; without this, focus falls back
+// to &lt;body&gt; and a keyboard user starts again from the top of the page.
+afterRenderEffect(() =&gt; {
+  if (this.enrollment.status() === 'enrolled') this.enrolledStatus()?.nativeElement.focus();
+});</pre>
+  <div class="file">apps/web/src/app/features/course/course-page.html · excerpt</div>
+  <pre class="code tight" data-lang="html">&lt;p #enrolledStatus class="enrolled" tabindex="-1"&gt;You're enrolled&lt;/p&gt;</pre>
+  <p class="small muted">Why focus must move: lesson 05.</p>
+</section>
+
+<section id="effect-wrong" data-part="8" data-cue="Effects are the wrong tool when the result is state">
+  <h2>When an effect is the wrong tool</h2>
+  <table>
+    <tr><th>Use</th><th>When you want</th><th>In Coursewright</th></tr>
+    <tr><td>computed</td><td>derived, read-only state</td><td>statusText, heading, isAuthenticated</td></tr>
+    <tr><td>linkedSignal</td><td>writable state that resets from a source</td><td>the search box's query</td></tr>
+    <tr><td>a resource</td><td>data for a read</td><td>the course, my enrollments</td></tr>
+    <tr><td>handler / RxJS</td><td>to react to a user event</td><td>onSearch(), enroll()</td></tr>
+    <tr><td>effect</td><td>to sync state to a non-signal</td><td>the document title, focus</td></tr>
+  </table>
+  <p class="small amber" style="margin-top:32px">ADR-0004: "effects that re-implement switchMap badly"</p>
+</section>
+
+<!-- ───────────── When not to use a store ───────────── -->
+<section id="adr-negative" data-part="9" data-cue="When not to use a store">
+  <h2>When not to use a store</h2>
+  <div class="file">docs/adr/0004-signals-and-rxjs-state.md · Consequences, Negative</div>
+  <p class="quote" style="font-size:44px">@ngrx/signals is a dependency; plain services with signals would do for an app this size. It's here because it's the pattern a team of this size standardizes on.</p>
+</section>
+
+<section id="range" data-part="9" data-cue="Coursewright shows the range">
+  <h2>Where each kind of state lives</h2>
+  <table>
+    <tr><th>Example</th><th>The state</th><th>Its home</th></tr>
+    <tr><td>LoginPage</td><td>one component's UI state</td><td>signals in the component</td></tr>
+    <tr><td>CoursePage</td><td>a read keyed by state</td><td>httpResource</td></tr>
+    <tr><td>EnrollmentController</td><td>a small workflow for one page</td><td>an injectable with signals, provided by the page</td></tr>
+    <tr><td>AuthStore</td><td>small app-wide state</td><td>a root service with signals</td></tr>
+    <tr><td>CatalogStore</td><td>six fields, two coordinated async flows</td><td>signalStore</td></tr>
+  </table>
+</section>
+
+<section id="rule" data-part="9" data-cue="So the rule is: start with a signal">
+  <div class="kicker">The rule</div>
+  <p class="quote">Start with a signal where the state is used. <span class="accent">Promote it</span> when a second consumer needs it, or the coordination grows.</p>
+</section>
+
+<!-- ───────────── Trade-offs ───────────── -->
+<section id="tradeoffs" data-part="10" data-cue="Zoneless isn't free">
+  <h2>Zoneless isn't free</h2>
+  <ul>
+    <li>Plain fields assigned in callbacks silently stop updating</li>
+    <li>Some third-party libraries still assume a zone</li>
+    <li>Tests await <span class="accent">fixture.whenStable()</span> (lesson 10)</li>
+    <li>Two reactive models: "state, or an event?" is a review question</li>
+  </ul>
+</section>
+
+<section id="production" data-part="10" data-cue="What production would add">
+  <h2>What production would add</h2>
+  <ul>
+    <li>Entity collections (withEntities)</li>
+    <li>Optimistic updates with rollback</li>
+    <li>Cross-tab sync (BroadcastChannel)</li>
+    <li>Store devtools</li>
+  </ul>
+</section>
+
+<!-- ───────────── Traps ───────────── -->
+<section id="traps" data-part="11" data-cue="Assigning a plain field in a subscription or a timer">
+  <h2>Traps</h2>
+  <ul class="small">
+    <li>A plain field assigned in a subscribe or a timer, expected to render</li>
+    <li>A signal's value copied into a field once</li>
+    <li>An effect that derives state, or copies one signal into another</li>
+    <li>An array or object mutated inside a signal</li>
+    <li>A resource outside an injection context, or for a POST</li>
+    <li>A store by default</li>
+  </ul>
+</section>
+
+<!-- ───────────── Interview drill ───────────── -->
+<section id="drill" data-part="12" data-cue="Let's practise">
+  <div class="kicker">Interview drill</div>
+  <h1>Five questions</h1>
+  <p class="lead">After each question, pause and answer out loud. Then compare with the model answer.</p>
+</section>
+
+<section id="q1" data-part="12" data-cue="How do signals change change detection in a zoneless app, and what still triggers a render?" data-voice="interviewer">
+  <div class="kicker">Question 1 of 5</div>
+  <p class="question">How do signals change change detection in a zoneless app, and what still triggers a render?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a1" data-part="12" data-cue="Without zone.js, Angular no longer checks the tree">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>No whole-tree check after every async task</li>
+    <li>Triggers: template signals, listeners, markForCheck, setInput, attach/remove</li>
+    <li>Timers, promises, plain-field assignments: nothing</li>
+    <li>Only views that read the signal refresh; OnPush ancestors are walked past</li>
+  </ul>
+</section>
+
+<section id="q2" data-part="12" data-cue="When is an effect the wrong tool, and what would you use instead?" data-voice="interviewer">
+  <div class="kicker">Question 2 of 5</div>
+  <p class="question">When is an effect the wrong tool, and what would you use instead?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a2" data-part="12" data-cue="When the result is state. A computed derives read-only state">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>When the result is state</li>
+    <li>computed: read-only derived (statusText)</li>
+    <li>linkedSignal: writable, resets from a source (the search box)</li>
+    <li>Resources for reads; handlers or RxJS for events</li>
+    <li>Effect: sync to a non-signal (title, focus)</li>
+  </ul>
+</section>
+
+<section id="q3" data-part="12" data-cue="When would you not use a store, and just keep a signal in the component?" data-voice="interviewer">
+  <div class="kicker">Question 3 of 5</div>
+  <p class="question">When would you not use a store, and just keep a signal in the component?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a3" data-part="12" data-cue="Most of the time. State used by one component">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>One component's state: signals there (login page)</li>
+    <li>A read keyed by state: a resource (course page)</li>
+    <li>A small workflow: an injectable with signals (enrollment)</li>
+    <li>A store when fields and async flows coordinate (catalog)</li>
+  </ul>
+</section>
+
+<section id="q4" data-part="12" data-cue="Why is the search box a linked signal and not a computed?" data-voice="interviewer">
+  <div class="kicker">Question 4 of 5</div>
+  <p class="question">Why is the search box a linked signal and not a computed?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a4" data-part="12" data-cue="It needs two things at once">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Writable: every keystroke sets it; computed is read-only</li>
+    <li>Resets when ?q= changes from outside</li>
+    <li>linkedSignal: writable and re-derives from its source</li>
+    <li>Signal + effect copying the input: extra pass, hidden dependency</li>
+  </ul>
+</section>
+
+<section id="q5" data-part="12" data-cue="When would you load data with httpResource rather than an RxJS pipeline?" data-voice="interviewer">
+  <div class="kicker">Question 5 of 5</div>
+  <p class="question">When would you load data with httpResource rather than an RxJS pipeline?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a5" data-part="12" data-cue="For a read keyed by state">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>httpResource for a read keyed by state (the course)</li>
+    <li>Value, error, loading, status code as signals</li>
+    <li>RxJS when timing matters: debounce, cancel, ignore, append, retry</li>
+    <li>Never a resource for a write</li>
+  </ul>
+</section>
+
+<!-- ───────────── Recap ───────────── -->
+<template id="recap">
+  <h2>Five things to remember</h2>
+  <ol class="recap">
+    <li class="item">Without zone.js, Angular renders only when it's notified.</li>
+    <li class="item">Signals make rendering precise; OnPush is written out anyway.</li>
+    <li class="item">Derive, don't copy: computed, linkedSignal; effects only to leave the graph.</li>
+    <li class="item">Resources for reads, RxJS for events over time.</li>
+    <li class="item">Start with a signal where it's used; promote only when needed.</li>
+  </ol>
+</template>
+<section id="recap-0" data-part="13" data-cue="Five things to remember" data-template="recap" data-show="0"></section>
+<section id="recap-1" data-part="13" data-cue="One: without zone.js, Angular renders only when it's notified" data-template="recap" data-show="1"></section>
+<section id="recap-2" data-part="13" data-cue="Two: signals make rendering precise" data-template="recap" data-show="2"></section>
+<section id="recap-3" data-part="13" data-cue="Three: derive, don't copy" data-template="recap" data-show="3"></section>
+<section id="recap-4" data-part="13" data-cue="Four: resources for reads, RxJS for events over time" data-template="recap" data-show="4"></section>
+<section id="recap-5" data-part="13" data-cue="Five: start with a signal where the state is used" data-template="recap" data-show="5"></section>
+
+<section id="next" data-part="13" data-cue="In the next lesson">
+  <div class="kicker">Next</div>
+  <h1>03 · RxJS Races and Idempotent Submits</h1>
+  <p class="lead">How the catalog search survives a slow response, why Enroll uses exhaustMap, and why the server still needs an idempotency key.</p>
+</section>
+
+<script src="../assets/slides.js"></script>
+</body>
+</html>

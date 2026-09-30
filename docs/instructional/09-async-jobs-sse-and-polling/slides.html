@@ -1,0 +1,848 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 09 Slides</title>
+<!--
+  Slides for the lesson 09 video. Each <section> is one slide. data-cue is a phrase from script.md:
+  tools/instructional-video/build.cs shows the slide from the moment the narration reaches that phrase.
+  Open this file in a browser and use the arrow keys to step through the deck.
+-->
+<link rel="stylesheet" href="../assets/slides.css">
+</head>
+<body data-lesson-number="09" data-lesson-title="Async Jobs, SSE and Polling" data-parts="Introduction|The questions|Why a job|Accept fast|Queue and worker|SSE endpoint|SSE over fetch|Polling fallback|Reports page|Outbox|Costs|Bulk enrolment|Traps|Interview drill|Recap">
+
+<!-- ───────────── Intro ───────────── -->
+<section id="title" data-part="0">
+  <div class="kicker">Coursewright frontend · Lesson 09</div>
+  <h1>Async Jobs,<br>SSE and Polling</h1>
+  <p class="lead">Accept with a 202, work in the background, stream progress, fall back to polling, and make every step safe to repeat.</p>
+</section>
+
+<!-- ───────────── Questions ───────────── -->
+<section id="questions" data-part="1" data-cue="The questions this lesson answers">
+  <h2>The questions this lesson answers</h2>
+  <ul>
+    <li>Design bulk-enrolling 5,000 learners from a CSV upload, end to end</li>
+    <li>The SSE connection drops at 60%. What does the user see?</li>
+    <li>Why is "publish, then commit" wrong? What's the fix?</li>
+    <li>How do you make a consumer idempotent?</li>
+    <li>When would you pick polling over SSE?</li>
+  </ul>
+</section>
+
+<section id="thesis" data-part="1" data-cue="Keep one sentence in your head while you listen">
+  <div class="kicker">The thesis</div>
+  <p class="quote">Accept fast. Work in the background. <span class="accent">Push</span> progress, <span class="amber">poll</span> as the fallback.</p>
+  <p class="muted" style="margin-top:48px">And make every step safe to repeat.</p>
+</section>
+
+<!-- ───────────── Why a job ───────────── -->
+<section id="context" data-part="2" data-cue="Open docs/adr/0005-async-jobs.md">
+  <h2>ADR-0005: why a job, not a long request</h2>
+  <div class="cols">
+    <div class="card legacy">
+      <h3 class="amber">Must not</h3>
+      <ul>
+        <li>Lose the work to a 60-second proxy timeout</li>
+        <li>Lose it, or start it twice, when the user navigates away</li>
+      </ul>
+    </div>
+    <div class="card modern">
+      <h3>Must</h3>
+      <ul>
+        <li>Show live progress</li>
+        <li>Say when a retry happens</li>
+      </ul>
+    </div>
+  </div>
+  <div class="file" style="margin-top:36px">docs/adr/0005-async-jobs.md</div>
+</section>
+
+<section id="protocol" data-part="2" data-cue="The decision is a four-step protocol">
+  <h2>A four-step protocol</h2>
+  <svg width="1640" height="620" viewBox="0 0 1640 620">
+    <defs><marker id="arrow-pr" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="40" y="0" width="280" height="64" rx="14" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="180" y="42" fill="#e8eef8" font-size="28" text-anchor="middle">Browser</text>
+    <rect x="760" y="0" width="280" height="64" rx="14" fill="#121b2f" stroke="#38bdf8" stroke-width="3"/>
+    <text x="900" y="42" fill="#e8eef8" font-size="28" text-anchor="middle">BFF</text>
+    <rect x="1320" y="0" width="280" height="64" rx="14" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="1460" y="42" fill="#e8eef8" font-size="28" text-anchor="middle">Queue + worker</text>
+    <line x1="180" y1="64" x2="180" y2="610" stroke="#22304d" stroke-width="3" stroke-dasharray="8 8"/>
+    <line x1="900" y1="64" x2="900" y2="610" stroke="#22304d" stroke-width="3" stroke-dasharray="8 8"/>
+    <line x1="1460" y1="64" x2="1460" y2="610" stroke="#22304d" stroke-width="3" stroke-dasharray="8 8"/>
+    <line x1="180" y1="120" x2="890" y2="120" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-pr)"/>
+    <text x="210" y="108" fill="#e8eef8" font-size="24">1 · POST /api/reports</text>
+    <line x1="900" y1="165" x2="1450" y2="165" stroke="#8ea2c0" stroke-width="3" stroke-dasharray="10 6" marker-end="url(#arrow-pr)"/>
+    <text x="930" y="153" fill="#8ea2c0" font-size="22">publish</text>
+    <line x1="900" y1="220" x2="190" y2="220" stroke="#4ade80" stroke-width="3" marker-end="url(#arrow-pr)"/>
+    <text x="250" y="208" fill="#4ade80" font-size="24">202 Accepted · Location: /api/jobs/{id}</text>
+    <line x1="180" y1="295" x2="890" y2="295" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-pr)"/>
+    <text x="210" y="283" fill="#e8eef8" font-size="24">2 · GET /api/jobs/{id}/events</text>
+    <line x1="1460" y1="340" x2="910" y2="340" stroke="#8ea2c0" stroke-width="3" stroke-dasharray="10 6" marker-end="url(#arrow-pr)"/>
+    <text x="960" y="328" fill="#8ea2c0" font-size="22">progress changes</text>
+    <line x1="900" y1="395" x2="190" y2="395" stroke="#38bdf8" stroke-width="5" marker-end="url(#arrow-pr)"/>
+    <text x="250" y="381" fill="#38bdf8" font-size="24">SSE: job snapshots … completed</text>
+    <line x1="180" y1="475" x2="890" y2="475" stroke="#f5b544" stroke-width="3" stroke-dasharray="10 6" marker-end="url(#arrow-pr)"/>
+    <text x="210" y="463" fill="#f5b544" font-size="24">3 · if the stream fails: poll GET /api/jobs/{id}</text>
+    <line x1="180" y1="560" x2="890" y2="560" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-pr)"/>
+    <text x="210" y="548" fill="#e8eef8" font-size="24">4 · GET /api/jobs/{id}/result → CSV</text>
+  </svg>
+</section>
+
+<!-- ───────────── Accept fast ───────────── -->
+<section id="accept" data-part="3" data-cue="Open apps/bff/src/routes/reports.ts">
+  <h2>202: the job is a receipt</h2>
+  <div class="file">apps/bff/src/routes/reports.ts · condensed</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,2,5,8,9,14">// 202, not 201: the report doesn't exist yet. The job is a receipt, and Location says where to
+// follow it.
+app.post&lt;{ Body: ReportRequest }&gt;(
+  '/reports',
+  { onRequest: requireRole('manager'), schema: { body: { $ref: 'ReportRequest#' } } },
+  async (request, reply) =&gt; {
+    const { id: userId, tenantId } = request.user;
+    const job = jobs.create(userId, maxAttempts);
+    await queue.publish({
+      jobId: job.id,
+      // …
+    });
+    return reply.code(202).header('location', `/api/jobs/${job.id}`).send(job);
+  },
+);</pre>
+</section>
+
+<section id="accept-test" data-part="3" data-cue="The integration test named">
+  <h2>The test pins it down</h2>
+  <div class="file">apps/bff/test/reports.test.ts</div>
+  <pre class="code tight" data-lang="ts" data-mark="5,6,9">it('accepts the request with 202, a Location header and a queued job', async () =&gt; {
+  const response = await requestReport();
+  const job = response.json&lt;Job&gt;();
+
+  expect(response.statusCode).toBe(202);
+  expect(response.headers['location']).toBe(`/api/jobs/${job.id}`);
+  expect(job).toMatchObject({
+    type: 'completions',
+    status: 'queued',
+    progress: 0,
+    attempt: 0,
+    maxAttempts: 3,
+  });
+});</pre>
+</section>
+
+<!-- ───────────── Queue and worker ───────────── -->
+<section id="queue-seam" data-part="4" data-cue="Now the part that does the work">
+  <h2>The queue is a seam</h2>
+  <div class="file">apps/bff/src/jobs/queue.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="7,8,9,11,12,13">export interface Delivery&lt;T&gt; {
+  message: T;
+  /** 1 on first delivery, then 2, 3, ... like SQS's ApproximateReceiveCount. */
+  attempt: number;
+}
+// …
+/**
+ * The seam between "accept the work" and "do the work". Swap InMemoryJobQueue for SQS (a
+ * visibility timeout for retries, a redrive policy to a dead-letter queue) or for an outbox
+ * table plus a relay, and the routes and the worker don't change.
+ */
+export interface JobQueue&lt;T&gt; {
+  publish(message: T): Promise&lt;void&gt;;
+  subscribe(handler: MessageHandler&lt;T&gt;): void;
+}</pre>
+</section>
+
+<section id="queue-retry" data-part="4" data-cue="The in-memory queue delivers each message asynchronously">
+  <h2>Backoff, then the dead-letter list</h2>
+  <div class="file">apps/bff/src/jobs/queue.ts · InMemoryJobQueue</div>
+  <pre class="code tight" data-lang="ts" data-mark="6,7,9">async #deliver(message: T, attempt: number): Promise&lt;void&gt; {
+  try {
+    if (!this.#handler) throw new Error('The queue has no subscriber.');
+    await this.#handler({ message, attempt });
+  } catch {
+    if (attempt &gt;= this.#maxAttempts) {
+      this.deadLetters.push(message);
+    } else {
+      this.#schedule(message, attempt + 1, this.#retryBaseMs * 2 ** (attempt - 1));
+    }
+  }
+}</pre>
+  <p class="small muted">"After maxAttempts failures the message moves to deadLetters for a human to inspect, instead of retrying forever." Defaults: 3 attempts, 500 ms base.</p>
+</section>
+
+<section id="worker" data-part="4" data-cue="The worker, in report-worker.ts, has three habits">
+  <h2>Three habits worth copying</h2>
+  <div class="file">apps/bff/src/jobs/report-worker.ts · condensed</div>
+  <pre class="code tight" data-lang="ts" data-mark="2,3,10,12,13">return async ({ message: { jobId, tenantId, failAttempts }, attempt }) =&gt; {
+  // Every attempt starts from scratch: a retry doesn't resume where the last one failed.
+  jobs.update(jobId, { status: 'running', attempt, progress: 0 });
+  try {
+    // …
+  } catch (error) {
+    if (attempt &gt;= maxAttempts) {
+      // …
+    }
+    throw error; // the queue decides: retry with backoff, or dead-letter
+  }
+
+  // Save the file before announcing it, so a client that reacts to "completed" can download it.
+  jobs.saveResult(jobId, completionsCsv(db, tenantId));
+  jobs.update(jobId, { status: 'completed', resultUrl: `/api/jobs/${jobId}/result` });</pre>
+</section>
+
+<section id="knob" data-part="4" data-cue="The request's simulated failures field is a teaching knob">
+  <h2>The simulated failures knob</h2>
+  <svg width="1640" height="470" viewBox="0 0 1640 470">
+    <defs><marker id="arrow-kn" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <text x="0" y="36" fill="#38bdf8" font-size="28" font-weight="600">Simulated failures: 1</text>
+    <rect x="0" y="60" width="420" height="110" rx="16" fill="#2a1414" stroke="#f87171" stroke-width="2"/>
+    <text x="210" y="106" fill="#e8eef8" font-size="26" text-anchor="middle">attempt 1</text>
+    <text x="210" y="144" fill="#8ea2c0" font-size="22" text-anchor="middle">20%, 40%, fails at step 3 of 5</text>
+    <line x1="425" y1="115" x2="555" y2="115" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-kn)"/>
+    <text x="490" y="100" fill="#8ea2c0" font-size="20" text-anchor="middle">0.5 s</text>
+    <rect x="565" y="60" width="420" height="110" rx="16" fill="#0f2233" stroke="#4ade80" stroke-width="2"/>
+    <text x="775" y="106" fill="#e8eef8" font-size="26" text-anchor="middle">attempt 2</text>
+    <text x="775" y="144" fill="#8ea2c0" font-size="22" text-anchor="middle">from scratch: 0 → 100%</text>
+    <line x1="990" y1="115" x2="1120" y2="115" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-kn)"/>
+    <rect x="1130" y="60" width="510" height="110" rx="16" fill="#0f2233" stroke="#38bdf8" stroke-width="3"/>
+    <text x="1385" y="106" fill="#e8eef8" font-size="26" text-anchor="middle">completed</text>
+    <text x="1385" y="144" fill="#8ea2c0" font-size="22" text-anchor="middle">CSV saved first · nothing dead-lettered</text>
+    <text x="0" y="266" fill="#f5b544" font-size="28" font-weight="600">Simulated failures: 3</text>
+    <rect x="0" y="290" width="290" height="110" rx="16" fill="#2a1414" stroke="#f87171" stroke-width="2"/>
+    <text x="145" y="355" fill="#e8eef8" font-size="26" text-anchor="middle">attempt 1 ✕</text>
+    <line x1="295" y1="345" x2="395" y2="345" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-kn)"/>
+    <text x="345" y="330" fill="#8ea2c0" font-size="20" text-anchor="middle">0.5 s</text>
+    <rect x="405" y="290" width="290" height="110" rx="16" fill="#2a1414" stroke="#f87171" stroke-width="2"/>
+    <text x="550" y="355" fill="#e8eef8" font-size="26" text-anchor="middle">attempt 2 ✕</text>
+    <line x1="700" y1="345" x2="800" y2="345" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-kn)"/>
+    <text x="750" y="330" fill="#8ea2c0" font-size="20" text-anchor="middle">1 s</text>
+    <rect x="810" y="290" width="290" height="110" rx="16" fill="#2a1414" stroke="#f87171" stroke-width="2"/>
+    <text x="955" y="355" fill="#e8eef8" font-size="26" text-anchor="middle">attempt 3 ✕</text>
+    <line x1="1105" y1="345" x2="1120" y2="345" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-kn)"/>
+    <rect x="1130" y="290" width="510" height="110" rx="16" fill="#221b0d" stroke="#f5b544" stroke-width="2"/>
+    <text x="1385" y="336" fill="#e8eef8" font-size="26" text-anchor="middle">failed · dead-lettered</text>
+    <text x="1385" y="374" fill="#8ea2c0" font-size="22" text-anchor="middle">"Gave up after 3 attempts" · download 409</text>
+  </svg>
+  <div class="file">apps/bff/test/reports.test.ts · the retry test and the dead-letter test</div>
+</section>
+
+<!-- ───────────── SSE endpoint ───────────── -->
+<section id="job-store" data-part="5" data-cue="Each entry holds the latest snapshot of a job">
+  <h2>Snapshots, a sequence, one owner</h2>
+  <div class="file">apps/bff/src/jobs/job-store.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2,4,10,13">export interface JobEntry {
+  /** The latest snapshot. Snapshots are replaced, never mutated. */
+  job: Job;
+  /** Bumped on every change; it becomes the SSE event id. */
+  sequence: number;
+  ownerId: string;
+  result?: string;
+}
+// …
+/** The job, but only for the user who created it. */
+get(id: string, ownerId: string): Readonly&lt;JobEntry&gt; | undefined {
+  const entry = this.#entries.get(id);
+  return entry?.ownerId === ownerId ? entry : undefined;
+}</pre>
+  <p class="small muted">Someone else's job is a 404, like another tenant's course (lesson 08).</p>
+</section>
+
+<section id="sse-headers" data-part="5" data-cue="the events endpoint takes over the raw response">
+  <h2>Taking over the response</h2>
+  <div class="file">apps/bff/src/routes/reports.ts · GET /jobs/:jobId/events</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,6,7,9">// Take over the raw response: Fastify's reply pipeline is built for one body, not a stream.
+reply.hijack();
+const response = reply.raw;
+response.writeHead(200, {
+  ...(reply.getHeaders() as OutgoingHttpHeaders), // keep what hooks set, such as traceparent
+  'content-type': 'text/event-stream',
+  'cache-control': 'no-cache',
+  connection: 'keep-alive',
+  'x-accel-buffering': 'no', // ask nginx-style proxies not to buffer the stream
+});</pre>
+</section>
+
+<section id="sse-design" data-part="5" data-cue="Two comments in that handler carry the design">
+  <h2>Two comments carry the design</h2>
+  <div class="file">apps/bff/src/routes/reports.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,2,7,8">// Every event is a full snapshot, so a client that reconnects needs no replay: the first
+// event brings it up to date, and Last-Event-ID can be ignored.
+const send = (job: Job, sequence: number) =&gt; {
+  response.write(`id: ${sequence}\nevent: job\ndata: ${JSON.stringify(job)}\n\n`);
+  if (job.status === 'completed' || job.status === 'failed') close();
+};
+// A comment line keeps idle proxies and load balancers from timing the connection out.
+const heartbeat = setInterval(() =&gt; response.write(': heartbeat\n\n'), HEARTBEAT_MS);
+const unsubscribe = jobs.subscribe(entry.job.id, send);
+// …
+response.on('close', close); // the client went away
+
+send(entry.job, entry.sequence);</pre>
+  <p class="small muted">HEARTBEAT_MS = 15_000: a comment line every fifteen seconds.</p>
+</section>
+
+<section id="sse-test" data-part="5" data-cue="reads a real stream">
+  <h2>Testing a real stream</h2>
+  <div class="file">apps/bff/test/reports.test.ts · "streams job snapshots over SSE and closes after the last one"</div>
+  <pre class="code tight" data-lang="ts" data-mark="7,9,10,11,12">// text() resolves once the server ends the stream.
+const events = parseEventStream(await response.text());
+const ids = events.map((event) =&gt; event.id);
+const jobs = events.map((event) =&gt; event.job);
+
+expect(events.every((event) =&gt; event.event === 'job')).toBe(true);
+expect(ids).toEqual([...ids].sort((a, b) =&gt; a - b));
+expect(new Set(ids).size).toBe(ids.length);
+expect(
+  jobs.some((job) =&gt; job.status === 'running' &amp;&amp; job.progress &gt; 0 &amp;&amp; job.progress &lt; 100),
+).toBe(true);
+expect(jobs.at(-1)).toMatchObject({ status: 'completed', progress: 100 });</pre>
+  <p class="small muted">A second app with slower steps (jobStepMs: 40), listening on a real port, read with fetch.</p>
+</section>
+
+<!-- ───────────── SSE over fetch ───────────── -->
+<section id="why-sse" data-part="6" data-cue="Why SSE and not WebSockets?">
+  <h2>Why SSE?</h2>
+  <div class="cols3">
+    <div class="card modern"><h3>SSE</h3><p>One-way. Plain HTTP: it proxies and authenticates like any request. Event ids for resuming.</p></div>
+    <div class="card"><h3>WebSocket</h3><p>Two-way, a protocol upgrade of its own. Overkill for progress.</p></div>
+    <div class="card"><h3>Polling</h3><p>The simplest of all. Here, the fallback.</p></div>
+  </div>
+</section>
+
+<section id="fetch" data-part="6" data-cue="The obvious client is the browser's EventSource">
+  <h2>SSE over fetch, with the token</h2>
+  <div class="file">apps/web/src/app/features/reports/job-progress.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,2,6,7">// EventSource can't send an Authorization header, so read the stream with fetch.
+// fetch bypasses HttpClient and its interceptors: add the token and trace by hand.
+const response = await fetch(this.api.jobEventsUrl(jobId), {
+  headers: {
+    Accept: 'text/event-stream',
+    Authorization: `Bearer ${this.auth.accessToken()}`,
+    traceparent: createTraceparent(),
+  },
+  signal: abort.signal,
+});
+if (!response.ok || !response.body) {
+  throw new Error(`Job event stream failed with HTTP ${response.status}`);
+}</pre>
+  <p class="small muted">As of September 2026, EventSource still has no way to set request headers.</p>
+</section>
+
+<section id="reader" data-part="6" data-cue="Then it reads the body chunk by chunk">
+  <h2>Chunk by chunk</h2>
+  <div class="file">apps/web/src/app/features/reports/job-progress.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="6,7,8,9,13,14">const reader = response.body.getReader();
+const decoder = new TextDecoder();
+let buffer = '';
+for (;;) {
+  const { done, value } = await reader.read();
+  if (done) throw new Error('Job event stream closed before the job finished');
+  // stream: true keeps a multi-byte character that spans two chunks intact.
+  const { messages, rest } = parseSse(buffer + decoder.decode(value, { stream: true }));
+  buffer = rest;
+  for (const message of messages.filter((m) =&gt; m.event === 'job')) {
+    const job = JSON.parse(message.data) as Job;
+    subscriber.next(job);
+    if (isTerminal(job)) {
+      subscriber.complete();
+      // …</pre>
+</section>
+
+<section id="parse-test" data-part="6" data-cue="feeds it half a data line">
+  <h2>A pure parser, tested without a network</h2>
+  <div class="file">apps/web/src/app/features/reports/job-progress.spec.ts · parseSse</div>
+  <pre class="code" data-lang="ts" data-mark="2,3,5,6,7">it('keeps a message split mid-line until the rest arrives', () =&gt; {
+  const first = parseSse('event: job\nda');
+  expect(first.messages).toEqual([]);
+
+  const second = parseSse(first.rest + 'ta: {"progress":50}\n\nevent: jo');
+  expect(second.messages).toEqual([{ event: 'job', data: '{"progress":50}' }]);
+  expect(second.rest).toBe('event: jo');
+});</pre>
+  <p class="small muted">sse.ts: "Network chunks can end anywhere, even mid-line, so whatever follows the last blank line comes back as rest."</p>
+</section>
+
+<section id="fetch-cost" data-part="6" data-cue="What does fetch cost you?">
+  <h2>What fetch costs you</h2>
+  <div class="cols">
+    <div class="card legacy">
+      <h3 class="amber">EventSource gives, fetch doesn't</h3>
+      <ul>
+        <li>Automatic reconnect</li>
+        <li>Last-Event-ID on the reconnect</li>
+      </ul>
+    </div>
+    <div class="card modern">
+      <h3>Why Coursewright can afford it</h3>
+      <ul>
+        <li>Every event is a full snapshot</li>
+        <li>Any failure falls back to polling</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── Polling fallback ───────────── -->
+<section id="watch-job" data-part="7" data-cue="That fallback is one line">
+  <h2>The fallback is one line</h2>
+  <div class="file">apps/web/src/app/features/reports/job-progress.ts</div>
+  <pre class="code" data-lang="ts" data-mark="3,4,5,6">/** Job snapshots until the job completes or fails: pushed over SSE, or polled as a fallback. */
+watchJob(jobId: string): Observable&lt;Job&gt; {
+  // Any stream failure (a network drop, a 401 from an expired token, a stream cut off
+  // early) falls back to polling. Polling goes through HttpClient, so it gets the
+  // interceptors' token refresh and tracing back.
+  return this.stream(jobId).pipe(catchError(() =&gt; this.poll(jobId)));
+}</pre>
+</section>
+
+<section id="poll" data-part="7" data-cue="Polling asks for the job at once">
+  <h2>Polling with backoff</h2>
+  <div class="file">apps/web/src/app/features/reports/job-progress.ts · excerpt</div>
+  <pre class="code" data-lang="ts" data-mark="2,7,8">/** 1 s, 2 s, 4 s, then every 8 s. */
+export const pollDelay = (poll: number) =&gt; Math.min(1000 * 2 ** (poll - 1), 8000);
+// …
+private poll(jobId: string): Observable&lt;Job&gt; {
+  // Each repeat resubscribes to the cold HttpClient observable, which sends a new request.
+  return this.api.getJob(jobId).pipe(
+    repeat({ delay: (poll) =&gt; timer(pollDelay(poll)) }),
+    takeWhile((job) =&gt; !isTerminal(job), true),
+  );
+}</pre>
+</section>
+
+<section id="poll-spec" data-part="7" data-cue="The spec drives it with fake timers">
+  <h2>Backoff, tested with fake timers</h2>
+  <div class="file">apps/web/src/app/features/reports/job-progress.spec.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="7,8,9,10">it('falls back to polling with backoff when the stream fails', async () =&gt; {
+  vi.useFakeTimers();
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+  // …
+  await vi.advanceTimersByTimeAsync(0); // let the rejected fetch settle
+
+  http.expectOne('/api/jobs/j1').flush(job('running', 30));
+  await vi.advanceTimersByTimeAsync(pollDelay(1) - 1);
+  http.expectNone('/api/jobs/j1');
+  await vi.advanceTimersByTimeAsync(1);
+
+  http.expectOne('/api/jobs/j1').flush(job('completed', 100));
+  expect(seen.map((j) =&gt; j.status)).toEqual(['running', 'completed']);
+  expect(completed).toBe(true);
+});</pre>
+</section>
+
+<section id="drop-60" data-part="7" data-cue="Now the drill scenario: the connection drops at sixty percent">
+  <h2>The stream drops at 60%</h2>
+  <svg width="1640" height="560" viewBox="0 0 1640 560">
+    <text x="0" y="40" fill="#8ea2c0" font-size="26">Browser: the progress bar</text>
+    <rect x="0" y="70" width="1640" height="48" rx="10" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <rect x="0" y="70" width="984" height="48" rx="10" fill="#38bdf8"/>
+    <rect x="984" y="70" width="328" height="48" fill="#121b2f" stroke="#8ea2c0" stroke-width="2" stroke-dasharray="8 6"/>
+    <rect x="1312" y="70" width="328" height="48" rx="10" fill="#f5b544"/>
+    <text x="492" y="104" fill="#04121f" font-size="24" font-weight="600" text-anchor="middle">SSE snapshots: 20%, 40%, 60%</text>
+    <text x="1476" y="104" fill="#221b0d" font-size="24" font-weight="600" text-anchor="middle">polled</text>
+    <line x1="984" y1="130" x2="984" y2="200" stroke="#f87171" stroke-width="3"/>
+    <text x="984" y="236" fill="#f87171" font-size="26" text-anchor="middle">✕ reader fails → catchError</text>
+    <line x1="1312" y1="130" x2="1312" y2="270" stroke="#f5b544" stroke-width="3"/>
+    <text x="1312" y="300" fill="#f5b544" font-size="26" text-anchor="middle">first poll, at once: 80%</text>
+    <text x="1312" y="336" fill="#8ea2c0" font-size="22" text-anchor="middle">then 1 s, 2 s … until completed</text>
+    <text x="0" y="410" fill="#8ea2c0" font-size="26">Server: the job</text>
+    <rect x="0" y="440" width="1640" height="48" rx="10" fill="#0f2233" stroke="#4ade80" stroke-width="2"/>
+    <text x="820" y="473" fill="#e8eef8" font-size="24" text-anchor="middle">keeps running in the queue: it never depended on the connection</text>
+    <text x="984" y="530" fill="#8ea2c0" font-size="22" text-anchor="middle">'close' → unsubscribe, stop the heartbeat</text>
+  </svg>
+  <p class="small muted">Illustrative percentages. The user sees the bar jump forward and finish, with no error.</p>
+</section>
+
+<section id="gaps" data-part="7" data-cue="Be honest about the gaps, though">
+  <h2>Be honest about the gaps</h2>
+  <div class="cols3">
+    <div class="card legacy"><h3 class="amber">Polling fails too</h3><p>The error reaches the page: an alert, and no retry.</p></div>
+    <div class="card legacy"><h3 class="amber">The user navigates away</h3><p>The job keeps running, but there's no way back to it.</p></div>
+    <div class="card modern"><h3>Production</h3><p>Retry the polls. A list of recent exports. The job id in the URL.</p></div>
+  </div>
+</section>
+
+<!-- ───────────── Reports page ───────────── -->
+<section id="export" data-part="8" data-cue="The page, features/reports/reports-page.ts, ties it together">
+  <h2>From 202 to progress</h2>
+  <div class="file">apps/web/src/app/features/reports/reports-page.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2,3,9,10,12">protected exportReport(): void {
+  // One export at a time. The button shows busy rather than disabled, so focus stays on it.
+  if (this.exporting()) return;
+  this.exporting.set(true);
+  // …
+  this.api
+    .requestReport({ type: 'completions', failAttempts: this.failAttempts.value })
+    .pipe(
+      // 202 Accepted returns at once with the queued job; progress arrives from watchJob.
+      switchMap((job) =&gt; this.jobProgress.watchJob(job.id).pipe(startWith(job))),
+      finalize(() =&gt; this.exporting.set(false)),
+      takeUntilDestroyed(this.destroyRef),
+    )
+    // …</pre>
+  <p class="small muted">Leaving the page unsubscribes, which aborts the fetch. The job itself carries on.</p>
+</section>
+
+<section id="status" data-part="8" data-cue="The status text is a computed signal">
+  <h2>Progress and status, announced</h2>
+  <div class="file">apps/web/src/app/features/reports/reports-page.html · excerpt</div>
+  <pre class="code tight" data-lang="html" data-mark="3,7">@let current = job();
+@if (current) {
+  &lt;cw-progress class="progress" label="Export progress" [value]="current.progress" /&gt;
+}
+
+&lt;!-- Always rendered: a live region must exist before its text changes to be announced. --&gt;
+&lt;p class="status" role="status"&gt;{{ statusText() }}&lt;/p&gt;</pre>
+  <div class="file">apps/web/src/app/features/reports/reports-page.ts · statusText</div>
+  <pre class="code tight" data-lang="ts">case 'running':
+  return `Running — attempt ${job.attempt} of ${job.maxAttempts}`;</pre>
+  <p class="small muted">cw-progress wraps a native &lt;progress&gt; with a visible label. Why the status role: lesson 05.</p>
+</section>
+
+<section id="download" data-part="8" data-cue="Download has its own detail">
+  <h2>A download that needs a token</h2>
+  <div class="file">apps/web/src/app/features/reports/reports-page.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,2,6,11,12">// The CSV needs the bearer token, so a plain &lt;a href&gt; can't fetch it. Fetch it as a blob
+// through HttpClient, then hand it to the browser as a download via an object URL.
+protected download(jobId: string): void {
+// …
+private save(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = this.document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  // Revoke on a later task: revoking straight after click() can cancel the download.
+  setTimeout(() =&gt; URL.revokeObjectURL(url));
+}</pre>
+</section>
+
+<section id="e2e" data-part="8" data-cue="The end-to-end test exports with one simulated failure">
+  <h2>The whole journey, end to end</h2>
+  <div class="file">apps/web/e2e/reports.spec.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="6,7,10,11,12">test('a manager exports a report that fails once, retries, completes and downloads', async ({
+  page,
+}) =&gt; {
+  await signIn(page, 'manager.acme');
+  // …
+  // One simulated failure: the worker retries with backoff and succeeds on attempt 2.
+  await page.getByLabel('Simulated failures').selectOption('1');
+  await page.getByRole('button', { name: 'Export completions report' }).click();
+
+  await expect(page.getByRole('progressbar', { name: 'Export progress' })).toBeVisible();
+  await expect(page.getByText(/attempt 2 of 3/)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Completed')).toBeVisible({ timeout: 15_000 });
+  // …</pre>
+  <p class="small muted">Then it clicks "Download report" and expects a file name ending in .csv.</p>
+</section>
+
+<!-- ───────────── Outbox ───────────── -->
+<section id="two-systems" data-part="9" data-cue="In Coursewright, creating the job and publishing the message">
+  <h2>One process here, two systems in production</h2>
+  <div class="cols">
+    <div class="card modern"><h3>Coursewright</h3><p>The job store and the queue share one process's memory. They can't disagree.</p></div>
+    <div class="card legacy"><h3 class="amber">Production</h3><p>A database and a queue. No transaction spans both.</p></div>
+  </div>
+</section>
+
+<section id="dual-write" data-part="9" data-cue="Publish first, then commit">
+  <h2>The dual write fails both ways</h2>
+  <div class="cols">
+    <div class="card legacy"><h3 class="amber">Publish, then commit</h3><p>The commit fails. A consumer works on a job that doesn't exist.</p></div>
+    <div class="card legacy"><h3 class="amber">Commit, then publish</h3><p>A crash in between. The job is saved but never published.</p></div>
+  </div>
+</section>
+
+<section id="outbox" data-part="9" data-cue="The ADR's production mapping names the fix">
+  <h2>The outbox pattern</h2>
+  <svg width="1640" height="520" viewBox="0 0 1640 520">
+    <defs><marker id="arrow-ob" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="0" y="40" width="470" height="220" rx="18" fill="#0f2233" stroke="#38bdf8" stroke-width="3"/>
+    <text x="235" y="84" fill="#38bdf8" font-size="26" font-weight="600" text-anchor="middle">one database transaction</text>
+    <rect x="40" y="110" width="390" height="56" rx="12" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="235" y="147" fill="#e8eef8" font-size="24" text-anchor="middle">INSERT job row</text>
+    <rect x="40" y="180" width="390" height="56" rx="12" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="235" y="217" fill="#e8eef8" font-size="24" text-anchor="middle">INSERT outbox row</text>
+    <line x1="475" y1="150" x2="545" y2="150" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-ob)"/>
+    <rect x="555" y="95" width="250" height="110" rx="16" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="680" y="145" fill="#e8eef8" font-size="26" text-anchor="middle">Relay</text>
+    <text x="680" y="180" fill="#8ea2c0" font-size="20" text-anchor="middle">publish, mark sent</text>
+    <line x1="810" y1="150" x2="880" y2="150" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-ob)"/>
+    <rect x="890" y="95" width="200" height="110" rx="16" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="990" y="160" fill="#e8eef8" font-size="26" text-anchor="middle">SNS</text>
+    <line x1="1095" y1="150" x2="1165" y2="150" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-ob)"/>
+    <rect x="1175" y="95" width="200" height="110" rx="16" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="1275" y="160" fill="#e8eef8" font-size="26" text-anchor="middle">SQS</text>
+    <line x1="1380" y1="150" x2="1435" y2="150" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-ob)"/>
+    <rect x="1445" y="95" width="195" height="110" rx="16" fill="#0f2233" stroke="#4ade80" stroke-width="2"/>
+    <text x="1542" y="145" fill="#e8eef8" font-size="26" text-anchor="middle">Consumer</text>
+    <text x="1542" y="180" fill="#4ade80" font-size="20" text-anchor="middle">idempotent</text>
+    <line x1="1275" y1="210" x2="1275" y2="330" stroke="#f5b544" stroke-width="3" marker-end="url(#arrow-ob)"/>
+    <text x="1295" y="280" fill="#f5b544" font-size="22">redrive policy</text>
+    <rect x="1130" y="340" width="290" height="90" rx="16" fill="#221b0d" stroke="#f5b544" stroke-width="2"/>
+    <text x="1275" y="395" fill="#e8eef8" font-size="26" text-anchor="middle">Dead-letter queue</text>
+    <text x="0" y="330" fill="#e8eef8" font-size="26">State and event commit together, or not at all.</text>
+    <text x="0" y="372" fill="#8ea2c0" font-size="24">The relay may publish twice; SQS delivers at least once.</text>
+    <text x="0" y="414" fill="#8ea2c0" font-size="24">The visibility timeout replaces in-memory redelivery.</text>
+  </svg>
+  <div class="file">docs/adr/0005-async-jobs.md · Production mapping</div>
+</section>
+
+<section id="idempotent" data-part="9" data-cue="The relay can publish twice">
+  <h2>An idempotent consumer</h2>
+  <div class="file">Sketch · not in this repo · the effect and the dedupe record commit together</div>
+  <pre class="code tight" data-lang="ts" data-mark="3,4,7,10">await db.transaction(async (tx) =&gt; {
+  const seen = await tx.query('SELECT 1 FROM processed_messages WHERE id = ?', [msg.id]);
+  if (seen.length &gt; 0) return; // a redelivery: already done
+  await tx.query(
+    `INSERT INTO enrollments (user_id, course_id, enrolled_at) VALUES (?, ?, ?)
+     ON CONFLICT (user_id, course_id) DO NOTHING`,
+    [userId, courseId, now],
+  );
+  await tx.query('INSERT INTO processed_messages (id) VALUES (?)', [msg.id]);
+});</pre>
+  <div class="cols3" style="gap:24px">
+    <div class="card"><h3>Dedupe</h3><p>Message ids, same transaction</p></div>
+    <div class="card"><h3>By design</h3><p>Unique constraints, upserts</p></div>
+    <div class="card"><h3>Forward only</h3><p>completed never goes back</p></div>
+  </div>
+</section>
+
+<!-- ───────────── Costs ───────────── -->
+<section id="costs" data-part="10" data-cue="The ADR is honest about the costs">
+  <h2>The costs ADR-0005 admits</h2>
+  <div class="cols3">
+    <div class="card legacy"><h3 class="amber">One process</h3><p>Jobs live in memory. A restart loses them.</p></div>
+    <div class="card legacy"><h3 class="amber">One instance</h3><p>Two BFF instances wouldn't share jobs.</p></div>
+    <div class="card legacy"><h3 class="amber">A connection per tab</h3><p>HTTP/1.1: six per origin. HTTP/2 removes the limit.</p></div>
+  </div>
+</section>
+
+<section id="production" data-part="10" data-cue="So production would add job state in the database">
+  <h2>What production would add</h2>
+  <ul>
+    <li>Job state in the database</li>
+    <li>SSE fan-out across BFF instances: Redis pub/sub, or a consumer per instance</li>
+    <li>Results in storage, behind presigned URLs</li>
+    <li>Versioned event schemas</li>
+    <li>traceparent in every envelope: browser → queue → worker</li>
+  </ul>
+</section>
+
+<!-- ───────────── Bulk enrolment ───────────── -->
+<section id="bulk" data-part="11" data-cue="Now the core question">
+  <h2>Bulk-enrolling 5,000 learners</h2>
+  <svg width="1640" height="640" viewBox="0 0 1640 640">
+    <defs><marker id="arrow-bk" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <line x1="1425" y1="40" x2="175" y2="40" stroke="#4ade80" stroke-width="3" marker-end="url(#arrow-bk)"/>
+    <text x="800" y="28" fill="#4ade80" font-size="22" text-anchor="middle">202 Accepted · Location: the import job</text>
+    <rect x="0" y="70" width="330" height="130" rx="16" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="165" y="120" fill="#e8eef8" font-size="26" text-anchor="middle">Browser</text>
+    <text x="165" y="158" fill="#8ea2c0" font-size="21" text-anchor="middle">check size + header row</text>
+    <line x1="335" y1="135" x2="400" y2="135" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-bk)"/>
+    <rect x="410" y="70" width="330" height="130" rx="16" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="575" y="120" fill="#e8eef8" font-size="26" text-anchor="middle">Storage</text>
+    <text x="575" y="158" fill="#8ea2c0" font-size="21" text-anchor="middle">presigned upload</text>
+    <line x1="745" y1="135" x2="810" y2="135" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-bk)"/>
+    <rect x="820" y="70" width="330" height="130" rx="16" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="985" y="120" fill="#e8eef8" font-size="26" text-anchor="middle">POST an import</text>
+    <text x="985" y="158" fill="#8ea2c0" font-size="21" text-anchor="middle">Idempotency-Key per intent</text>
+    <line x1="1155" y1="135" x2="1220" y2="135" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-bk)"/>
+    <rect x="1230" y="70" width="410" height="130" rx="16" fill="#0f2233" stroke="#38bdf8" stroke-width="3"/>
+    <text x="1435" y="110" fill="#e8eef8" font-size="26" text-anchor="middle">BFF / platform</text>
+    <text x="1435" y="146" fill="#8ea2c0" font-size="21" text-anchor="middle">role · tenant from the token</text>
+    <text x="1435" y="178" fill="#8ea2c0" font-size="21" text-anchor="middle">job + outbox, one transaction</text>
+    <line x1="1435" y1="205" x2="1435" y2="290" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-bk)"/>
+    <rect x="1230" y="300" width="410" height="130" rx="16" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="1435" y="350" fill="#e8eef8" font-size="26" text-anchor="middle">Queue + DLQ</text>
+    <text x="1435" y="388" fill="#8ea2c0" font-size="21" text-anchor="middle">at least once · poison → DLQ</text>
+    <line x1="1225" y1="365" x2="1160" y2="365" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-bk)"/>
+    <rect x="820" y="300" width="330" height="130" rx="16" fill="#0f2233" stroke="#4ade80" stroke-width="2"/>
+    <text x="985" y="340" fill="#e8eef8" font-size="26" text-anchor="middle">Worker</text>
+    <text x="985" y="376" fill="#8ea2c0" font-size="21" text-anchor="middle">validate every row</text>
+    <text x="985" y="406" fill="#8ea2c0" font-size="21" text-anchor="middle">batches, a transaction each</text>
+    <line x1="815" y1="365" x2="750" y2="365" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-bk)"/>
+    <rect x="410" y="300" width="330" height="130" rx="16" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="575" y="350" fill="#e8eef8" font-size="26" text-anchor="middle">Enrollments</text>
+    <text x="575" y="388" fill="#8ea2c0" font-size="21" text-anchor="middle">UNIQUE (user_id, course_id)</text>
+    <line x1="985" y1="435" x2="985" y2="500" stroke="#f5b544" stroke-width="3" marker-end="url(#arrow-bk)"/>
+    <rect x="820" y="510" width="330" height="110" rx="16" fill="#221b0d" stroke="#f5b544" stroke-width="2"/>
+    <text x="985" y="555" fill="#e8eef8" font-size="26" text-anchor="middle">Error report</text>
+    <text x="985" y="590" fill="#8ea2c0" font-size="21" text-anchor="middle">download, fix, upload again</text>
+    <path d="M880,300 L880,250 L165,250 L165,214" fill="none" stroke="#38bdf8" stroke-width="3" stroke-dasharray="10 6" marker-end="url(#arrow-bk)"/>
+    <text x="20" y="345" fill="#38bdf8" font-size="22">progress: counts over SSE,</text>
+    <text x="20" y="377" fill="#38bdf8" font-size="22">polling as the fallback</text>
+  </svg>
+  <div class="file">Sketch · not in this repo · built from Coursewright's parts</div>
+</section>
+
+<section id="bulk-request" data-part="11" data-cue="In the browser, check the file's size and header row">
+  <h2>The request path</h2>
+  <div class="steps">
+    <div class="step on"><span class="num">1</span>Check size and header row in the browser</div>
+    <div class="step on"><span class="num">2</span>Upload to storage via a presigned URL</div>
+    <div class="step on"><span class="num">3</span>POST the import with an Idempotency-Key</div>
+    <div class="step on"><span class="num">4</span>Manager role; tenant from the token</div>
+    <div class="step on"><span class="num">5</span>Job + outbox row in one transaction</div>
+    <div class="step on"><span class="num">6</span>202 Accepted with a Location</div>
+  </div>
+  <p class="small muted" style="margin-top:36px">One idempotency key per intent, reused on retries: lesson 03.</p>
+</section>
+
+<section id="bulk-worker" data-part="11" data-cue="The worker validates every row">
+  <h2>The work path</h2>
+  <div class="cols">
+    <div class="card modern"><h3>Batches</h3><p>A few hundred rows per transaction. The unique constraint makes a redelivered batch harmless.</p></div>
+    <div class="card"><h3>Bad rows</h3><p>Don't fail the job. They go into an error report to download, fix and upload again.</p></div>
+    <div class="card"><h3>Transient failures</h3><p>Retry with exponential backoff.</p></div>
+    <div class="card legacy"><h3 class="amber">Poison messages</h3><p>To the dead-letter queue. The job is marked failed.</p></div>
+  </div>
+</section>
+
+<section id="bulk-progress" data-part="11" data-cue="Progress streams as counts">
+  <h2>Progress people can act on</h2>
+  <div class="file">Sketch · not in this repo · an import job snapshot</div>
+  <pre class="code" data-lang="json" data-mark="3,4,5,6,7">{
+  "status": "running",
+  "total": 5000,
+  "processed": 3000,
+  "enrolled": 2950,
+  "skipped": 32,
+  "failed": 18
+}</pre>
+  <ul class="small">
+    <li>Announce milestones, not every percent</li>
+    <li>A list of recent imports: leave, and come back</li>
+  </ul>
+</section>
+
+<!-- ───────────── Traps ───────────── -->
+<section id="traps" data-part="12" data-cue="Holding a request open for the whole job">
+  <h2>Traps</h2>
+  <ul class="small">
+    <li>Holding a request open for the whole job</li>
+    <li>201 for work that hasn't happened yet</li>
+    <li>The token in the query string, so EventSource can connect</li>
+    <li>Forgetting fetch skips the interceptors: no token, no trace</li>
+    <li>Assuming a network chunk is a whole message</li>
+    <li>Streaming deltas instead of snapshots</li>
+    <li>Retrying forever, with no dead-letter queue</li>
+    <li>Publishing before committing, to consumers that aren't idempotent</li>
+  </ul>
+</section>
+
+<!-- ───────────── Interview drill ───────────── -->
+<section id="drill" data-part="13" data-cue="Let's practise">
+  <div class="kicker">Interview drill</div>
+  <h1>Five questions</h1>
+  <p class="lead">After each question, pause and answer out loud. Then compare with the model answer.</p>
+</section>
+
+<section id="q1" data-part="13" data-cue="Design bulk-enrolling five thousand learners from a CSV upload, end to end." data-voice="interviewer">
+  <div class="kicker">Question 1 of 5</div>
+  <p class="question">Design bulk-enrolling 5,000 learners from a CSV upload, end to end.</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a1" data-part="13" data-cue="Check the file's size and header in the browser">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Validate in the browser; upload to storage</li>
+    <li>POST with an Idempotency-Key → 202 + Location</li>
+    <li>Role, tenant from the token; job + outbox in one transaction</li>
+    <li>Batches in transactions; UNIQUE (user, course)</li>
+    <li>Error report for bad rows; DLQ; counts over SSE + polling</li>
+  </ul>
+</section>
+
+<section id="q2" data-part="13" data-cue="The SSE connection drops at sixty percent. What does the user see, and what does the code do?" data-voice="interviewer">
+  <div class="kicker">Question 2 of 5</div>
+  <p class="question">The SSE connection drops at 60%. What does the user see, and what does the code do?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a2" data-part="13" data-cue="Almost nothing. The server sees the socket close">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Server: 'close' → unsubscribe; the job carries on</li>
+    <li>Browser: the reader fails → catchError → poll</li>
+    <li>Polling uses HttpClient, so an expired token refreshes</li>
+    <li>First poll: the current snapshot; then 1 s → 8 s</li>
+    <li>Gap: a polling error ends it, with no retry</li>
+  </ul>
+</section>
+
+<section id="q3" data-part="13" data-cue="Why is &quot;publish to the queue, then commit to the database&quot; wrong? What's the fix?" data-voice="interviewer">
+  <div class="kicker">Question 3 of 5</div>
+  <p class="question">Why is "publish to the queue, then commit to the database" wrong? What's the fix?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a3" data-part="13" data-cue="Because there's no transaction across the queue and the database">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>No transaction spans a queue and a database</li>
+    <li>Publish, then a failed commit: a phantom job</li>
+    <li>Commit, then a crash: saved, never published</li>
+    <li>Outbox: state + event row in one transaction; a relay publishes</li>
+    <li>The relay may publish twice: idempotent consumers</li>
+  </ul>
+</section>
+
+<section id="q4" data-part="13" data-cue="How do you make a consumer idempotent?" data-voice="interviewer">
+  <div class="kicker">Question 4 of 5</div>
+  <p class="question">How do you make a consumer idempotent?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a4" data-part="13" data-cue="Assume every message arrives more than once">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Assume every message arrives more than once</li>
+    <li>Record message ids in the same transaction as the effect</li>
+    <li>Idempotent by design: unique constraints, upserts</li>
+    <li>States that only move forward</li>
+    <li>Side effects, like emails, behind the same check</li>
+  </ul>
+</section>
+
+<section id="q5" data-part="13" data-cue="When would you pick polling over SSE, even with SSE available?" data-voice="interviewer">
+  <div class="kicker">Question 5 of 5</div>
+  <p class="question">When would you pick polling over SSE, even with SSE available?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a5" data-part="13" data-cue="When updates are rare or the job takes minutes">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Rare updates, or jobs that take minutes</li>
+    <li>Many watchers: a connection each; six per origin on HTTP/1.1</li>
+    <li>Proxies that buffer or cut streams; serverless backends</li>
+    <li>Simpler, cacheable, easy to scale</li>
+    <li>Coursewright: SSE first, polling with backoff as the fallback</li>
+  </ul>
+</section>
+
+<!-- ───────────── Recap ───────────── -->
+<template id="recap">
+  <h2>Five things to remember</h2>
+  <ol class="recap">
+    <li class="item">Accept fast: 202 + Location is a receipt, and the work survives a closed tab.</li>
+    <li class="item">The queue is a seam: backoff, three attempts, a dead-letter list; attempts start from scratch.</li>
+    <li class="item">Push, with pull as the fallback: SSE over fetch, a pure parser, polling with backoff.</li>
+    <li class="item">Snapshots, not deltas: a reconnect needs no replay.</li>
+    <li class="item">An outbox for state and event; idempotent consumers for at-least-once delivery.</li>
+  </ol>
+</template>
+<section id="recap-0" data-part="14" data-cue="Five things to remember" data-template="recap" data-show="0"></section>
+<section id="recap-1" data-part="14" data-cue="One: accept fast" data-template="recap" data-show="1"></section>
+<section id="recap-2" data-part="14" data-cue="Two: the queue is a seam" data-template="recap" data-show="2"></section>
+<section id="recap-3" data-part="14" data-cue="Three: push, with pull as the fallback" data-template="recap" data-show="3"></section>
+<section id="recap-4" data-part="14" data-cue="Four: send snapshots, not deltas" data-template="recap" data-show="4"></section>
+<section id="recap-5" data-part="14" data-cue="Five: in production, write the state and the event together" data-template="recap" data-show="5"></section>
+
+<section id="next" data-part="14" data-cue="In the next lesson">
+  <div class="kicker">Next</div>
+  <h1>10 · Testing: Unit, Integration and E2E</h1>
+  <p class="lead">Testing races and backoff deterministically, BFF integration tests on a real database, and an E2E suite with no retries.</p>
+</section>
+
+<script src="../assets/slides.js"></script>
+</body>
+</html>

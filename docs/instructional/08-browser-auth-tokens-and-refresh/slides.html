@@ -1,0 +1,800 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 08 Slides</title>
+<!--
+  Slides for the lesson 08 video. Each <section> is one slide. data-cue is a phrase from script.md:
+  tools/instructional-video/build.cs shows the slide from the moment the narration reaches that phrase.
+  Open this file in a browser and use the arrow keys to step through the deck.
+-->
+<link rel="stylesheet" href="../assets/slides.css">
+</head>
+<body data-lesson-number="08" data-lesson-title="Browser Auth: Tokens and Refresh" data-parts="Introduction|The questions|Two attackers|Token storage|The cookie|Rotation|The interceptor|Shared refresh|Restore|Authorization|SameSite|Two tabs|OIDC and PKCE|Traps|Interview drill|Recap">
+
+<!-- ───────────── Intro ───────────── -->
+<section id="title" data-part="0">
+  <div class="kicker">Coursewright frontend · Lesson 08</div>
+  <h1>Browser Auth:<br>Tokens and Refresh</h1>
+  <p class="lead">Where tokens live, how they rotate, how one refresh serves five 401s, and why the server, not a guard, decides.</p>
+</section>
+
+<!-- ───────────── Questions ───────────── -->
+<section id="questions" data-part="1" data-cue="The questions this lesson answers">
+  <h2>The questions this lesson answers</h2>
+  <ul>
+    <li>Where would you store tokens in a SPA, and why not localStorage?</li>
+    <li>Walk through OIDC authorization code + PKCE. What does PKCE protect against?</li>
+    <li>What does SameSite=Strict stop, and what doesn't it stop?</li>
+    <li>Two tabs refresh at once with rotation on. What happens?</li>
+    <li>How do you test that a learner can't export reports?</li>
+  </ul>
+</section>
+
+<section id="thesis" data-part="1" data-cue="Keep one sentence in your head while you listen">
+  <div class="kicker">The thesis</div>
+  <p class="quote">The browser is <span class="amber">hostile territory</span>.</p>
+  <p class="muted" style="margin-top:48px">Give script as little as possible. Give every credential a short life. Enforce every rule on the server.</p>
+</section>
+
+<!-- ───────────── Two attackers ───────────── -->
+<section id="attackers" data-part="2" data-cue="The first is cross-site scripting">
+  <h2>Two attackers</h2>
+  <svg width="1640" height="520" viewBox="0 0 1640 520">
+    <defs><marker id="arrow-at" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="0" y="0" width="790" height="520" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="40" y="58" fill="#f5b544" font-size="32" font-weight="600">1 · Cross-site scripting</text>
+    <rect x="40" y="90" width="710" height="250" rx="14" fill="none" stroke="#38bdf8" stroke-width="2" stroke-dasharray="10 8"/>
+    <text x="64" y="126" fill="#8ea2c0" font-size="22">your origin</text>
+    <rect x="70" y="150" width="270" height="90" rx="12" fill="#2a1414" stroke="#f87171" stroke-width="2"/>
+    <text x="205" y="205" fill="#e8eef8" font-size="26" text-anchor="middle">injected script</text>
+    <rect x="450" y="150" width="270" height="70" rx="12" fill="#0f2233" stroke="#1f5f7f" stroke-width="2"/>
+    <text x="585" y="195" fill="#e8eef8" font-size="26" text-anchor="middle">localStorage</text>
+    <rect x="450" y="250" width="270" height="70" rx="12" fill="#0f2233" stroke="#1f5f7f" stroke-width="2"/>
+    <text x="585" y="295" fill="#e8eef8" font-size="26" text-anchor="middle">/api</text>
+    <line x1="345" y1="185" x2="440" y2="185" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-at)"/>
+    <text x="392" y="228" fill="#8ea2c0" font-size="20" text-anchor="middle">reads</text>
+    <path d="M300,245 C330,285 380,285 440,285" fill="none" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-at)"/>
+    <text x="215" y="300" fill="#8ea2c0" font-size="20" text-anchor="middle">calls, reads replies</text>
+    <text x="40" y="410" fill="#e8eef8" font-size="28">Reads anything script can reach</text>
+    <text x="40" y="460" fill="#8ea2c0" font-size="24">A bug, a compromised dependency, a third-party tag</text>
+    <rect x="850" y="0" width="790" height="520" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="890" y="58" fill="#f5b544" font-size="32" font-weight="600">2 · Cross-site request forgery</text>
+    <rect x="890" y="150" width="280" height="90" rx="12" fill="#2a1414" stroke="#f87171" stroke-width="2"/>
+    <text x="1030" y="205" fill="#e8eef8" font-size="26" text-anchor="middle">another site's page</text>
+    <rect x="1320" y="150" width="280" height="90" rx="12" fill="#0f2233" stroke="#1f5f7f" stroke-width="2"/>
+    <text x="1460" y="205" fill="#e8eef8" font-size="26" text-anchor="middle">your /api</text>
+    <line x1="1175" y1="195" x2="1310" y2="195" stroke="#f5b544" stroke-width="3" marker-end="url(#arrow-at)"/>
+    <text x="1245" y="290" fill="#f5b544" font-size="22" text-anchor="middle">the browser attaches your cookies</text>
+    <text x="890" y="410" fill="#e8eef8" font-size="28">Can't read your storage or responses</text>
+    <text x="890" y="460" fill="#8ea2c0" font-size="24">…but can make the browser send a request</text>
+  </svg>
+</section>
+
+<section id="trade" data-part="2" data-cue="Tokens that script can read are exposed to the first attacker">
+  <h2>No storage is safe from both</h2>
+  <table>
+    <tr><th>Where the credential lives</th><th>XSS (script on your page)</th><th>CSRF (another site)</th></tr>
+    <tr><td>localStorage</td><td class="red">Reads it, sends it anywhere, keeps it</td><td>Not exposed</td></tr>
+    <tr><td>Memory (a signal)</td><td class="amber">Uses it while the page is open</td><td>Not exposed</td></tr>
+    <tr><td>HttpOnly cookie</td><td class="green">Can't read it</td><td class="amber">Sent automatically, unless SameSite stops it</td></tr>
+  </table>
+  <p class="muted" style="margin-top:40px">Decide where each credential lives by what it's worth.</p>
+</section>
+
+<!-- ───────────── Token storage ───────────── -->
+<section id="adr-options" data-part="3" data-cue="It weighs four options">
+  <h2>ADR-0003: four options</h2>
+  <div class="cols">
+    <div class="card legacy"><h3 class="amber">1 · Both in localStorage</h3><p>Simple, survives reloads. Any script can read both.</p></div>
+    <div class="card modern"><h3>2 · Memory + HttpOnly cookie</h3><p>Chosen. Script can't read the refresh token.</p></div>
+    <div class="card"><h3>3 · Token handler</h3><p>Session cookie only. The BFF holds every token.</p></div>
+    <div class="card"><h3>4 · OIDC + PKCE</h3><p>Straight against an identity provider.</p></div>
+  </div>
+  <div class="file" style="margin-top:36px">docs/adr/0003-auth-token-storage.md</div>
+</section>
+
+<section id="chosen" data-part="3" data-cue="Coursewright chose option two">
+  <h2>The access token: a signal, nothing else</h2>
+  <div class="file">apps/web/src/app/core/auth/auth.store.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,2,4">// In memory only, never localStorage or sessionStorage: any script on the page can read
+// storage, so a single XSS bug would leak the token. After a reload, restore() gets a new
+// access token from the httpOnly refresh cookie, which script can't read at all.
+private readonly session = signal&lt;Session | null&gt;(null);
+private refreshInFlight: Observable&lt;Session&gt; | null = null;
+
+readonly user = computed(() =&gt; this.session()?.user ?? null);
+readonly accessToken = computed(() =&gt; this.session()?.accessToken ?? null);
+readonly isAuthenticated = computed(() =&gt; this.session() !== null);</pre>
+  <div class="cols" style="gap:32px">
+    <div class="card"><h3>Access token</h3><p>JWT · 15 minutes · in the login response body</p></div>
+    <div class="card"><h3>Refresh token</h3><p>Opaque, random · 7 days · HttpOnly cookie</p></div>
+  </div>
+</section>
+
+<section id="what-it-buys" data-part="3" data-cue="Be precise about what that buys">
+  <h2>Be precise about what that buys</h2>
+  <div class="cols">
+    <div class="card legacy">
+      <h3 class="amber">XSS can still</h3>
+      <ul>
+        <li>Call the API with the in-memory token</li>
+        <li>Call /api/auth/refresh and read the new access token</li>
+      </ul>
+    </div>
+    <div class="card modern">
+      <h3>XSS can't</h3>
+      <ul>
+        <li>Read the refresh cookie</li>
+        <li>Walk away with a credential that works for a week</li>
+      </ul>
+    </div>
+  </div>
+  <p class="muted" style="margin-top:40px">The real defence against XSS is not having it: Angular's sanitization and a strict CSP.</p>
+</section>
+
+<!-- ───────────── The cookie ───────────── -->
+<section id="cookie-options" data-part="4" data-cue="the cookie options are written once">
+  <h2>The cookie options, written once</h2>
+  <div class="file">apps/bff/src/routes/auth.ts</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,2">// httpOnly: page scripts, and so XSS, can't read it. SameSite=Strict: the browser never sends it
+// cross-site, which is the CSRF defence for /refresh and /logout. Path: only /api/auth gets it.
+const cookieOptions = {
+  httpOnly: true,
+  sameSite: 'strict',
+  secure: secureCookies,
+  path: '/api/auth',
+} as const;</pre>
+  <p class="small muted">Login, refresh and logout all reuse these options, so the cookie can't drift between endpoints.</p>
+</section>
+
+<section id="attributes" data-part="4" data-cue="HttpOnly: page scripts, and so XSS, can't read it">
+  <h2>Attribute by attribute</h2>
+  <table>
+    <tr><th>Attribute</th><th>What it does here</th></tr>
+    <tr><td>HttpOnly</td><td>Page scripts, and so XSS, can't read it</td></tr>
+    <tr><td>SameSite=Strict</td><td>Never sent cross-site: the CSRF defence for /refresh and /logout</td></tr>
+    <tr><td>Path=/api/auth</td><td>Only the auth endpoints receive it</td></tr>
+    <tr><td>Secure</td><td>From configuration: off in local dev (plain http), on in production</td></tr>
+  </table>
+  <div class="file" style="margin-top:36px">apps/bff/src/routes/auth.ts · apps/bff/src/app.ts (secureCookies)</div>
+</section>
+
+<section id="no-store" data-part="4" data-cue="Every response that carries tokens also sets">
+  <h2>No caching, and a pinned algorithm</h2>
+  <div class="file">apps/bff/src/routes/auth.ts · startSession · excerpt</div>
+  <pre class="code tight" data-lang="ts">  .header('cache-control', 'no-store'); // responses that carry tokens must never be cached</pre>
+  <div class="file">apps/bff/src/auth/access-tokens.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2,4">async verify(token) {
+  // Pin the algorithm: never let the token's own header choose how it is checked.
+  const { payload } = await jwtVerify(token, key, {
+    algorithms: ['HS256'],
+    issuer: ISSUER,
+    audience: AUDIENCE,
+  });</pre>
+  <p class="small muted">Login also checks unknown usernames against <span class="accent">DUMMY_PASSWORD_HASH</span>, so timing doesn't reveal which exist.</p>
+</section>
+
+<section id="cookie-test" data-part="4" data-cue="asserts every attribute, and a max age of seven days">
+  <h2>A test pins the cookie down</h2>
+  <div class="file">apps/bff/test/auth.test.ts · excerpt</div>
+  <pre class="code" data-lang="ts" data-mark="1,6,7,8,9,10">it('signs in and sets an httpOnly, SameSite=Strict refresh cookie', async () =&gt; {
+  // …
+  expect(response.statusCode).toBe(200);
+  expect(response.headers['cache-control']).toBe('no-store');
+  // …
+  expect(response.cookies.find(({ name }) =&gt; name === 'cw_refresh')).toMatchObject({
+    httpOnly: true,
+    sameSite: 'Strict',
+    path: '/api/auth',
+    maxAge: 7 * 24 * 60 * 60,
+  });
+});</pre>
+</section>
+
+<!-- ───────────── Rotation ───────────── -->
+<section id="rotate" data-part="5" data-cue="The server stores only a hash of each refresh token">
+  <h2>Each refresh token works exactly once</h2>
+  <div class="file">apps/bff/src/auth/refresh-tokens.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,10,11,12">/** Spends a refresh token and issues its replacement. Each token works exactly once. */
+export function rotateRefreshToken(
+  db: DatabaseSync,
+  presented: string,
+  now = Date.now(),
+): Rotation {
+  // …
+  if (row.expires_at &lt;= now) return { ok: false, reason: 'expired' };
+
+  return transaction(db, () =&gt; {
+    revokeRefreshToken(db, presented, now);
+    return { ok: true, userId: row.user_id, token: issueRefreshToken(db, row.user_id, now) };
+  });
+}</pre>
+  <p class="small muted">issueRefreshToken: "Creates an opaque token for the cookie. Only its hash is stored."</p>
+</section>
+
+<section id="reuse" data-part="5" data-cue="The interesting branch is a spent token coming back">
+  <h2>Reuse detection</h2>
+  <div class="file">apps/bff/src/auth/refresh-tokens.ts</div>
+  <pre class="code tight" data-lang="ts" data-mark="2,3,6,7,8">if (row.revoked_at !== null) {
+  // Reuse detection: a spent token coming back means two parties hold it, and we can't tell
+  // which one is the thief. Revoke every token the user has, so both must sign in again.
+  // (Two tabs refreshing with the same cookie at once would also land here; the web app
+  // single-flights its refresh, and some systems allow a few seconds' grace instead.)
+  db.prepare(
+    'UPDATE refresh_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL',
+  ).run(now, row.user_id);
+  return { ok: false, reason: 'reused' };
+}</pre>
+  <p class="small muted">routes/auth.ts then logs a warning: <span class="accent">'refresh token reused; revoked every session for this user'</span></p>
+</section>
+
+<section id="rotation-test" data-part="5" data-cue="The test tells the story">
+  <h2>A thief replays the first token</h2>
+  <svg width="1640" height="440" viewBox="0 0 1640 440">
+    <defs><marker id="arrow-rt" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="0" y="40" width="300" height="100" rx="16" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="150" y="100" fill="#e8eef8" font-size="30" text-anchor="middle">first</text>
+    <line x1="305" y1="90" x2="435" y2="90" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-rt)"/>
+    <text x="370" y="72" fill="#8ea2c0" font-size="20" text-anchor="middle">refresh</text>
+    <rect x="445" y="40" width="300" height="100" rx="16" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="595" y="100" fill="#e8eef8" font-size="30" text-anchor="middle">second</text>
+    <line x1="750" y1="90" x2="880" y2="90" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-rt)"/>
+    <text x="815" y="72" fill="#8ea2c0" font-size="20" text-anchor="middle">refresh</text>
+    <rect x="890" y="40" width="300" height="100" rx="16" fill="#0f2233" stroke="#38bdf8" stroke-width="3"/>
+    <text x="1040" y="100" fill="#e8eef8" font-size="30" text-anchor="middle">third (latest)</text>
+    <text x="1240" y="80" fill="#8ea2c0" font-size="24">login, then two</text>
+    <text x="1240" y="112" fill="#8ea2c0" font-size="24">rotations: 200, 200</text>
+    <rect x="0" y="230" width="780" height="100" rx="16" fill="#2a1414" stroke="#f87171" stroke-width="2"/>
+    <text x="390" y="290" fill="#e8eef8" font-size="28" text-anchor="middle">thief: refresh(first) → 401, reused: revoke all</text>
+    <rect x="860" y="230" width="780" height="100" rx="16" fill="#221b0d" stroke="#f5b544" stroke-width="2"/>
+    <text x="1250" y="290" fill="#e8eef8" font-size="28" text-anchor="middle">user: refresh(third) → 401, revoked too</text>
+    <line x1="150" y1="145" x2="150" y2="222" stroke="#f87171" stroke-width="3" stroke-dasharray="8 6" marker-end="url(#arrow-rt)"/>
+    <line x1="1040" y1="145" x2="1150" y2="222" stroke="#f5b544" stroke-width="3" stroke-dasharray="8 6" marker-end="url(#arrow-rt)"/>
+    <text x="820" y="410" fill="#8ea2c0" font-size="24" text-anchor="middle">A stolen refresh token works once at most, and replaying it burns every session.</text>
+  </svg>
+  <div class="file">apps/bff/test/auth.test.ts · "rotates the refresh token, and reusing a spent one revokes every session"</div>
+</section>
+
+<!-- ───────────── The interceptor ───────────── -->
+<section id="interceptor-top" data-part="6" data-cue="Back in the browser, open core/auth/auth.interceptor.ts">
+  <h2>Only same-origin API calls, never auth</h2>
+  <div class="file">apps/web/src/app/core/auth/auth.interceptor.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2,3,4">export const authInterceptor: HttpInterceptorFn = (request, next) =&gt; {
+  // Auth endpoints use the cookie, not the bearer token, and must never trigger a refresh loop.
+  if (!request.url.startsWith('/api/') || request.url.startsWith('/api/auth/')) {
+    return next(request);
+  }
+
+  const auth = inject(AuthStore);
+  const router = inject(Router);
+
+  return next(withToken(request, auth.accessToken())).pipe(
+  // …</pre>
+  <p class="small muted">Anything outside /api/ passes through, so the bearer token never goes to another origin.</p>
+</section>
+
+<section id="interceptor-401" data-part="6" data-cue="Otherwise, it adds the bearer header and sends the request">
+  <h2>Refresh once, retry once</h2>
+  <div class="file">apps/web/src/app/core/auth/auth.interceptor.ts · condensed</div>
+  <pre class="code tight" data-lang="ts" data-mark="6,7,13">return next(withToken(request, auth.accessToken())).pipe(
+  catchError((error: unknown) =&gt; {
+    if (!(error instanceof HttpErrorResponse) || error.status !== 401) {
+      return throwError(() =&gt; error);
+    }
+    // The access token expired: refresh once, then retry once. A second 401 propagates.
+    return auth.refresh().pipe(
+      catchError(() =&gt; {
+        // The refresh cookie is gone or revoked too. AuthStore has already cleared the session.
+        // … navigate to /login with a returnUrl …
+        return throwError(() =&gt; error);
+      }),
+      switchMap((session) =&gt; next(withToken(request, session.accessToken))),
+    );</pre>
+  <p class="small muted">The retry sits outside both error handlers: a second 401 reaches the caller. No loop.</p>
+</section>
+
+<section id="interceptor-spec" data-part="6" data-cue="The spec covers all four behaviours">
+  <h2>Four behaviours, four tests</h2>
+  <ul class="checks">
+    <li>sends the bearer token, but not to auth endpoints</li>
+    <li>refreshes once and retries once after a 401</li>
+    <li>shares one refresh between concurrent 401s</li>
+    <li>signs out and sends the user to the login page when the refresh fails</li>
+  </ul>
+  <div class="file" style="margin-top:24px">apps/web/src/app/core/auth/auth.interceptor.spec.ts</div>
+  <p class="small muted" style="margin-top:28px">app.config.ts: <span class="accent">withInterceptors([traceInterceptor, authInterceptor])</span>, so a retry keeps the same traceparent (lesson 11).</p>
+</section>
+
+<!-- ───────────── Shared refresh ───────────── -->
+<section id="five-401s" data-part="7" data-cue="Five requests go out at once with an expired token">
+  <h2>Five parallel 401s</h2>
+  <svg width="1640" height="560" viewBox="0 0 1640 560">
+    <defs><marker id="arrow-fp" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="0" y="0" width="790" height="560" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="40" y="56" fill="#f5b544" font-size="30" font-weight="600">Naive: a refresh per 401</text>
+    <rect x="100" y="90" width="590" height="80" rx="14" fill="#0f2233" stroke="#1f5f7f" stroke-width="2"/>
+    <text x="395" y="142" fill="#e8eef8" font-size="28" text-anchor="middle">5 requests → 5 × 401</text>
+    <line x1="395" y1="175" x2="395" y2="225" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-fp)"/>
+    <rect x="100" y="235" width="590" height="80" rx="14" fill="#221b0d" stroke="#f5b544" stroke-width="2"/>
+    <text x="395" y="287" fill="#e8eef8" font-size="28" text-anchor="middle">5 × POST /api/auth/refresh</text>
+    <line x1="395" y1="320" x2="395" y2="370" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-fp)"/>
+    <rect x="100" y="380" width="590" height="80" rx="14" fill="#2a1414" stroke="#f87171" stroke-width="2"/>
+    <text x="395" y="432" fill="#e8eef8" font-size="28" text-anchor="middle">1 rotates · 4 present a spent token</text>
+    <text x="395" y="520" fill="#f87171" font-size="26" text-anchor="middle">reuse detected: every session revoked</text>
+    <rect x="850" y="0" width="790" height="560" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="890" y="56" fill="#38bdf8" font-size="30" font-weight="600">Coursewright: one shared refresh</text>
+    <rect x="950" y="90" width="590" height="80" rx="14" fill="#0f2233" stroke="#1f5f7f" stroke-width="2"/>
+    <text x="1245" y="142" fill="#e8eef8" font-size="28" text-anchor="middle">5 requests → 5 × 401</text>
+    <line x1="1245" y1="175" x2="1245" y2="225" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-fp)"/>
+    <rect x="950" y="235" width="590" height="80" rx="14" fill="#0f2233" stroke="#38bdf8" stroke-width="3"/>
+    <text x="1245" y="287" fill="#e8eef8" font-size="28" text-anchor="middle">1 × POST /api/auth/refresh</text>
+    <line x1="1245" y1="320" x2="1245" y2="370" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-fp)"/>
+    <rect x="950" y="380" width="590" height="80" rx="14" fill="#0f2233" stroke="#4ade80" stroke-width="2"/>
+    <text x="1245" y="432" fill="#e8eef8" font-size="28" text-anchor="middle">5 retries with the new token</text>
+    <text x="1245" y="520" fill="#4ade80" font-size="26" text-anchor="middle">the user never notices</text>
+  </svg>
+</section>
+
+<section id="shared-code" data-part="7" data-cue="The fix is in the auth store">
+  <h2>One in-flight refresh, shared</h2>
+  <div class="file">apps/web/src/app/core/auth/auth.store.ts</div>
+  <pre class="code tight" data-lang="ts" data-mark="6,11,12">/**
+ * Concurrent callers share one request. Refresh tokens are single-use, so a second parallel
+ * refresh would present a spent token, and the BFF's reuse detection would revoke the session.
+ */
+refresh(): Observable&lt;Session&gt; {
+  this.refreshInFlight ??= this.api.refresh().pipe(
+    tap({
+      next: (session) =&gt; this.session.set(session),
+      error: () =&gt; this.session.set(null),
+    }),
+    finalize(() =&gt; (this.refreshInFlight = null)),
+    share(),
+  );
+  return this.refreshInFlight;
+}</pre>
+</section>
+
+<section id="shared-spec" data-part="7" data-cue="The spec proves it">
+  <h2>A race, made deterministic</h2>
+  <div class="file">apps/web/src/app/core/auth/auth.interceptor.spec.ts</div>
+  <pre class="code" data-lang="ts" data-mark="7,8">it('shares one refresh between concurrent 401s', () =&gt; {
+  http.get('/api/courses').subscribe();
+  http.get('/api/me/enrollments').subscribe();
+
+  backend.expectOne('/api/courses').flush(null, unauthorized);
+  backend.expectOne('/api/me/enrollments').flush(null, unauthorized);
+  // expectOne fails if the second 401 had started a second refresh.
+  backend.expectOne('/api/auth/refresh').flush(session('new-token'));
+
+  backend.expectOne('/api/courses').flush({ items: [], nextCursor: null });
+  backend.expectOne('/api/me/enrollments').flush({ items: [] });
+});</pre>
+</section>
+
+<section id="refinement" data-part="7" data-cue="One refinement">
+  <h2>A refinement: a late 401</h2>
+  <div class="file">Sketch · not in this repo · auth.interceptor.ts</div>
+  <pre class="code" data-lang="ts" data-mark="5,6">const sent = auth.accessToken();
+return next(withToken(request, sent)).pipe(
+  catchError((error: unknown) =&gt; {
+    // … not a 401: rethrow, as today
+    const current = auth.accessToken();
+    if (current &amp;&amp; current !== sent) return next(withToken(request, current));
+    return auth.refresh().pipe(/* … as today … */);
+  }),
+);</pre>
+  <p class="muted">Sent with the old token, answered after the refresh finished: just retry.</p>
+</section>
+
+<!-- ───────────── Restore ───────────── -->
+<section id="restore" data-part="8" data-cue="A token in memory disappears on reload">
+  <h2>Restore before the first navigation</h2>
+  <div class="file">apps/web/src/app/app.config.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2">// Runs before the first navigation, so guards already know whether the user is signed in.
+provideAppInitializer(() =&gt; inject(AuthStore).restore()),</pre>
+  <div class="file">apps/web/src/app/core/auth/auth.store.ts</div>
+  <pre class="code tight" data-lang="ts" data-mark="3">/** Startup: a valid refresh cookie silently restores the session; a 401 just means signed out. */
+restore(): Observable&lt;unknown&gt; {
+  return this.refresh().pipe(catchError(() =&gt; of(null)));
+}</pre>
+  <p class="small muted">Deep links behind auth: lesson 04.</p>
+</section>
+
+<section id="restore-e2e" data-part="8" data-cue="The cost, which the ADR records">
+  <h2>The cost, and the proof</h2>
+  <div class="cols" style="margin-bottom:40px">
+    <div class="card legacy"><h3 class="amber">Cost</h3><p>One refresh round trip on every page load</p></div>
+    <div class="card modern"><h3>Proof</h3><p>The E2E journey reloads and stays signed in</p></div>
+  </div>
+  <div class="file">apps/web/e2e/learner-journey.spec.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="3">// The access token lives only in memory; a reload restores the session from the
+// httpOnly refresh cookie.
+await page.reload();
+await expect(heading).toBeVisible();
+await expect(page.getByText("You're enrolled")).toBeVisible();</pre>
+</section>
+
+<!-- ───────────── Authorization ───────────── -->
+<section id="routes" data-part="9" data-cue="Now authorization">
+  <h2>In the browser: guards and a hidden link</h2>
+  <div class="file">apps/web/src/app/app.routes.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="4">{
+  path: 'reports',
+  title: 'Reports',
+  canMatch: [authGuard, roleGuard('manager')],
+  loadComponent: () =&gt; import('./features/reports/reports-page').then((m) =&gt; m.ReportsPage),
+},</pre>
+  <div class="file">apps/web/src/app/shell/shell.html · excerpt</div>
+  <pre class="code tight" data-lang="html" data-mark="1">@if (isManager()) {
+  &lt;li&gt;
+    &lt;a routerLink="/reports" routerLinkActive="active" ariaCurrentWhenActive="page"&gt;
+      Reports
+    &lt;/a&gt;
+  &lt;/li&gt;
+}</pre>
+</section>
+
+<section id="not-security" data-part="9" data-cue="None of that is security, because anyone can call the API with curl">
+  <div class="kicker">ADR-0003</div>
+  <p class="quote">Hiding the Reports link from learners is a <span class="amber">convenience, not security</span>.</p>
+  <p class="muted" style="margin-top:48px">POST /api/reports returns 403 to a learner whatever the UI shows.</p>
+</section>
+
+<section id="server-rule" data-part="9" data-cue="The real rule is on the server">
+  <h2>The real rule is on the server</h2>
+  <div class="file">apps/bff/src/routes/reports.ts · POST /reports · excerpt</div>
+  <pre class="code tight" data-lang="ts">  { onRequest: requireRole('manager'), schema: { body: { $ref: 'ReportRequest#' } } },</pre>
+  <div class="file">apps/bff/src/auth/guards.ts</div>
+  <pre class="code tight" data-lang="ts" data-mark="2,3,8">/**
+ * A route-level onRequest hook. It runs after authentication but before body validation,
+ * so a caller without the role can't probe the request schema.
+ */
+export function requireRole(role: Role) {
+  return async (request: FastifyRequest, reply: FastifyReply) =&gt; {
+    if (!request.user.roles.includes(role)) {
+      return sendProblem(reply, { status: 403, detail: `This needs the ${role} role.` });
+    }
+  };
+}</pre>
+</section>
+
+<section id="role-tests" data-part="9" data-cue="The reports test named">
+  <h2>Test the rule where it lives</h2>
+  <div class="file">apps/bff/test/reports.test.ts · the rule</div>
+  <pre class="code tight" data-lang="ts" data-mark="5,6">it('is for managers only', async () =&gt; {
+  const learner = await login(app, 'learner.acme');
+  const response = await requestReport(0, learner);
+
+  expect(response.statusCode).toBe(403);
+  expect(response.json()).toMatchObject({ status: 403, type: 'about:blank' });
+});</pre>
+  <div class="file">apps/web/e2e/reports.spec.ts · only the UX</div>
+  <pre class="code tight" data-lang="ts" data-mark="4">test('reports are hidden from learners', async ({ page }) =&gt; {
+  await signIn(page, 'learner.acme');
+  await expect(page.getByRole('link', { name: 'Catalog' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Reports' })).toHaveCount(0);
+});</pre>
+</section>
+
+<section id="tenancy" data-part="9" data-cue="Tenancy works the same way">
+  <h2>Tenancy: from the token, 404 across tenants</h2>
+  <div class="file">apps/bff/src/routes/courses.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="3,9,11">app.get&lt;{ Params: { courseId: string } }&gt;('/courses/:courseId', async (request, reply) =&gt; {
+  const { courseId } = request.params;
+  const { id: userId, tenantId } = request.user;
+
+  const row = db
+    .prepare(
+      `SELECT ${SUMMARY_COLUMNS}, c.description, c.updated_at
+       FROM courses c
+       WHERE c.id = ? AND c.tenant_id = ?`,
+    )
+    .get(courseId, tenantId) as CourseRow | undefined;
+  // 404, not 403: to another tenant this course doesn't exist, and a 403 would confirm it does.
+  if (!row) {
+    return sendProblem(reply, { status: 404, detail: 'There is no course with that id.' });</pre>
+  <p class="small muted">apps/bff/test/courses.test.ts: "is a 404 for another tenant's course, so its existence doesn't leak"</p>
+</section>
+
+<!-- ───────────── SameSite ───────────── -->
+<section id="samesite" data-part="10" data-cue="SameSite=Strict tells the browser not to attach the cookie">
+  <h2>Who gets the cookie sent?</h2>
+  <svg width="1640" height="520" viewBox="0 0 1640 520">
+    <defs><marker id="arrow-ss" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="0" y="20" width="620" height="110" rx="16" fill="#0f2233" stroke="#1f5f7f" stroke-width="2"/>
+    <text x="310" y="68" fill="#e8eef8" font-size="28" text-anchor="middle">coursewright.example</text>
+    <text x="310" y="106" fill="#8ea2c0" font-size="22" text-anchor="middle">the app's own fetch</text>
+    <rect x="0" y="200" width="620" height="110" rx="16" fill="#2a1414" stroke="#f87171" stroke-width="2"/>
+    <text x="310" y="248" fill="#e8eef8" font-size="28" text-anchor="middle">evil.example</text>
+    <text x="310" y="286" fill="#8ea2c0" font-size="22" text-anchor="middle">another site</text>
+    <rect x="0" y="380" width="620" height="110" rx="16" fill="#221b0d" stroke="#f5b544" stroke-width="2"/>
+    <text x="310" y="428" fill="#e8eef8" font-size="28" text-anchor="middle">promo.coursewright.example</text>
+    <text x="310" y="466" fill="#8ea2c0" font-size="22" text-anchor="middle">a compromised sibling subdomain</text>
+    <line x1="625" y1="75" x2="1180" y2="230" stroke="#4ade80" stroke-width="3" marker-end="url(#arrow-ss)"/>
+    <text x="820" y="110" fill="#4ade80" font-size="24">sent</text>
+    <line x1="625" y1="255" x2="1010" y2="255" stroke="#f87171" stroke-width="3" stroke-dasharray="10 8"/>
+    <text x="1030" y="264" fill="#f87171" font-size="30" font-weight="700">✕</text>
+    <text x="700" y="238" fill="#f87171" font-size="24">not sent: Strict stops this</text>
+    <line x1="625" y1="435" x2="1180" y2="290" stroke="#f5b544" stroke-width="3" marker-end="url(#arrow-ss)"/>
+    <text x="700" y="470" fill="#f5b544" font-size="24">sent: same registrable domain</text>
+    <rect x="1190" y="190" width="450" height="130" rx="18" fill="#121b2f" stroke="#38bdf8" stroke-width="3"/>
+    <text x="1415" y="248" fill="#e8eef8" font-size="28" text-anchor="middle">POST /api/auth/refresh</text>
+    <text x="1415" y="288" fill="#8ea2c0" font-size="22" text-anchor="middle">cookie: SameSite=Strict</text>
+  </svg>
+  <p class="small muted">Illustrative domains. A same-site call to refresh returns the token in the body, which a cross-origin page can't read.</p>
+</section>
+
+<section id="samesite-not" data-part="10" data-cue="It doesn't stop XSS, because injected script runs on your own site">
+  <h2>What SameSite=Strict doesn't stop</h2>
+  <div class="cols">
+    <div class="card modern">
+      <h3>Stops</h3>
+      <ul>
+        <li>A hostile page forcing a refresh or a logout</li>
+        <li>Any request another site starts</li>
+      </ul>
+    </div>
+    <div class="card legacy">
+      <h3 class="amber">Doesn't stop</h3>
+      <ul>
+        <li>XSS: it runs on your own site</li>
+        <li>A compromised sibling subdomain</li>
+        <li>A cookie that's already stolen</li>
+      </ul>
+    </div>
+  </div>
+  <p class="muted" style="margin-top:40px">Bearer-token calls need no CSRF defence: the browser never adds an Authorization header by itself.</p>
+</section>
+
+<section id="samesite-cost" data-part="10" data-cue="Strict usually costs something">
+  <h2>Strict's usual cost</h2>
+  <div class="cols3">
+    <div class="card legacy"><h3 class="amber">The cost</h3><p>A link from an email arrives without the cookie.</p></div>
+    <div class="card modern"><h3>Not here</h3><p>Only the app's own fetch calls use the cookie, after the page loads.</p></div>
+    <div class="card"><h3>Set it explicitly</h3><p>As of September 2026, browsers still differ when it's missing.</p></div>
+  </div>
+</section>
+
+<!-- ───────────── Two tabs ───────────── -->
+<section id="two-tabs" data-part="11" data-cue="The shared refresh lives in one tab's memory">
+  <h2>Two tabs, one cookie jar</h2>
+  <svg width="1640" height="600" viewBox="0 0 1640 600">
+    <defs><marker id="arrow-tt" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="80" y="0" width="260" height="70" rx="14" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="210" y="46" fill="#e8eef8" font-size="28" text-anchor="middle">Tab A</text>
+    <rect x="620" y="0" width="260" height="70" rx="14" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="750" y="46" fill="#e8eef8" font-size="28" text-anchor="middle">Tab B</text>
+    <rect x="1300" y="0" width="260" height="70" rx="14" fill="#121b2f" stroke="#38bdf8" stroke-width="3"/>
+    <text x="1430" y="46" fill="#e8eef8" font-size="28" text-anchor="middle">BFF</text>
+    <line x1="210" y1="70" x2="210" y2="560" stroke="#22304d" stroke-width="3" stroke-dasharray="8 8"/>
+    <line x1="750" y1="70" x2="750" y2="560" stroke="#22304d" stroke-width="3" stroke-dasharray="8 8"/>
+    <line x1="1430" y1="70" x2="1430" y2="560" stroke="#22304d" stroke-width="3" stroke-dasharray="8 8"/>
+    <line x1="210" y1="130" x2="1420" y2="130" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-tt)"/>
+    <text x="400" y="118" fill="#e8eef8" font-size="24">refresh with cookie R1</text>
+    <line x1="750" y1="200" x2="1420" y2="200" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-tt)"/>
+    <text x="800" y="188" fill="#e8eef8" font-size="24">refresh with cookie R1 (same moment)</text>
+    <line x1="1430" y1="280" x2="220" y2="280" stroke="#4ade80" stroke-width="3" marker-end="url(#arrow-tt)"/>
+    <text x="400" y="268" fill="#4ade80" font-size="24">200 · R1 spent, new cookie R2</text>
+    <line x1="1430" y1="360" x2="760" y2="360" stroke="#f87171" stroke-width="3" marker-end="url(#arrow-tt)"/>
+    <text x="830" y="348" fill="#f87171" font-size="24">401 · R1 reused: revoke all, R2 too</text>
+    <rect x="80" y="430" width="1480" height="110" rx="16" fill="#2a1414" stroke="#f87171" stroke-width="2"/>
+    <text x="820" y="480" fill="#e8eef8" font-size="28" text-anchor="middle">Both tabs end up at sign-in. The server logs a false alarm.</text>
+    <text x="820" y="518" fill="#8ea2c0" font-size="22" text-anchor="middle">Tab A's access token works until it expires; its next refresh fails.</text>
+  </svg>
+</section>
+
+<section id="tab-fixes" data-part="11" data-cue="names this case, and the ADR lists it as a known weakness">
+  <h2>Three fixes</h2>
+  <div class="cols3">
+    <div class="card modern"><h3>Web Locks</h3><p>Serialize refreshes across tabs. The second tab waits, then sends the new cookie.</p></div>
+    <div class="card"><h3>BroadcastChannel</h3><p>One tab refreshes and shares the access token with the others.</p></div>
+    <div class="card legacy"><h3 class="amber">Grace window</h3><p>The server accepts a just-spent token for a few seconds. Widens the thief's window.</p></div>
+  </div>
+  <p class="small muted" style="margin-top:40px">ADR-0003: "A BroadcastChannel or a tab lock would coordinate them; this repo doesn't."</p>
+</section>
+
+<section id="web-locks" data-part="11" data-cue="Serialize refreshes across tabs with the Web Locks API">
+  <h2>A tab lock around the refresh</h2>
+  <div class="file">Sketch · not in this repo · auth.store.ts</div>
+  <pre class="code" data-lang="ts" data-mark="3,4">refresh(): Observable&lt;Session&gt; {
+  this.refreshInFlight ??= defer(() =&gt;
+    // One refresh at a time across every tab of this origin.
+    navigator.locks.request('cw-refresh', () =&gt; firstValueFrom(this.api.refresh())),
+  ).pipe(/* tap, finalize and share, as today */);
+  return this.refreshInFlight;
+}</pre>
+  <p class="muted">The browser reads the cookie when the request is sent, so the waiting tab sends R2, not R1.</p>
+</section>
+
+<!-- ───────────── OIDC and PKCE ───────────── -->
+<section id="oidc-adr" data-part="12" data-cue="The username and password login stands in for a real identity provider">
+  <div class="kicker">ADR-0003</div>
+  <p class="quote">In production, sign-in would be <span class="accent">OIDC + PKCE</span>, with the BFF as the confidential client, and the rest of this design stays the same.</p>
+</section>
+
+<section id="pkce-flow" data-part="12" data-cue="The client makes a random secret, the code verifier">
+  <h2>Authorization code + PKCE</h2>
+  <svg width="1640" height="640" viewBox="0 0 1640 640">
+    <defs><marker id="arrow-pk" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="60" y="0" width="300" height="70" rx="14" fill="#121b2f" stroke="#38bdf8" stroke-width="3"/>
+    <text x="210" y="46" fill="#e8eef8" font-size="28" text-anchor="middle">BFF (client)</text>
+    <rect x="670" y="0" width="300" height="70" rx="14" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="820" y="46" fill="#e8eef8" font-size="28" text-anchor="middle">Browser</text>
+    <rect x="1280" y="0" width="300" height="70" rx="14" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="1430" y="46" fill="#e8eef8" font-size="28" text-anchor="middle">Identity provider</text>
+    <line x1="210" y1="70" x2="210" y2="630" stroke="#22304d" stroke-width="3" stroke-dasharray="8 8"/>
+    <line x1="820" y1="70" x2="820" y2="630" stroke="#22304d" stroke-width="3" stroke-dasharray="8 8"/>
+    <line x1="1430" y1="70" x2="1430" y2="630" stroke="#22304d" stroke-width="3" stroke-dasharray="8 8"/>
+    <rect x="30" y="100" width="560" height="70" rx="12" fill="#0f2233" stroke="#1f5f7f"/>
+    <text x="50" y="132" fill="#e8eef8" font-size="22">1 · verifier = random secret, kept</text>
+    <text x="50" y="160" fill="#8ea2c0" font-size="22">challenge = hash(verifier) · state = random</text>
+    <line x1="210" y1="215" x2="810" y2="215" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-pk)"/>
+    <line x1="820" y1="215" x2="1420" y2="215" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-pk)"/>
+    <text x="240" y="203" fill="#e8eef8" font-size="22">2 · redirect: challenge + state</text>
+    <text x="850" y="203" fill="#e8eef8" font-size="22">/authorize</text>
+    <rect x="1180" y="245" width="440" height="60" rx="12" fill="#0f2233" stroke="#1f5f7f"/>
+    <text x="1400" y="283" fill="#e8eef8" font-size="22" text-anchor="middle">3 · user signs in: SSO, MFA</text>
+    <line x1="1430" y1="345" x2="830" y2="345" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-pk)"/>
+    <line x1="820" y1="345" x2="220" y2="345" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-pk)"/>
+    <text x="900" y="333" fill="#e8eef8" font-size="22">4 · redirect: one-time code + state</text>
+    <text x="290" y="333" fill="#8ea2c0" font-size="22">check state</text>
+    <line x1="210" y1="440" x2="1420" y2="440" stroke="#38bdf8" stroke-width="3" marker-end="url(#arrow-pk)"/>
+    <text x="240" y="428" fill="#38bdf8" font-size="22">5 · back channel: code + verifier</text>
+    <rect x="1120" y="465" width="500" height="60" rx="12" fill="#0f2233" stroke="#38bdf8"/>
+    <text x="1370" y="503" fill="#e8eef8" font-size="22" text-anchor="middle">6 · hash(verifier) == challenge?</text>
+    <line x1="1430" y1="580" x2="220" y2="580" stroke="#4ade80" stroke-width="3" marker-end="url(#arrow-pk)"/>
+    <text x="290" y="568" fill="#4ade80" font-size="22">7 · tokens (ID, access, refresh)</text>
+  </svg>
+</section>
+
+<section id="pkce-protects" data-part="12" data-cue="PKCE protects against authorization code interception">
+  <h2>What PKCE protects against</h2>
+  <div class="cols">
+    <div class="card modern"><h3>Code interception</h3><p>A code stolen from a redirect, a log or the history is useless without the verifier, which never left the client.</p></div>
+    <div class="card"><h3>As of September 2026</h3><p>OAuth security guidance: PKCE for every client, confidential ones included. The implicit flow, tokens in the URL, is deprecated.</p></div>
+  </div>
+</section>
+
+<section id="production" data-part="12" data-cue="What production would add follows from that">
+  <h2>What production would add</h2>
+  <ul class="small">
+    <li>A real identity provider: OIDC + PKCE</li>
+    <li>SAML single sign-on for enterprise tenants</li>
+    <li>Possibly the token handler pattern, with CSRF tokens</li>
+    <li>Multi-factor authentication and audit logs</li>
+    <li>Cross-tab coordination (Web Locks or BroadcastChannel)</li>
+    <li>A strict content security policy</li>
+  </ul>
+</section>
+
+<!-- ───────────── Traps ───────────── -->
+<section id="traps" data-part="13" data-cue="Tokens in localStorage. One XSS bug">
+  <h2>Traps</h2>
+  <ul class="small">
+    <li>Tokens in localStorage, because it's convenient</li>
+    <li>"HttpOnly makes us safe from XSS"</li>
+    <li>One refresh per 401, with rotation on</li>
+    <li>A retry without a limit</li>
+    <li>A hidden link or a route guard treated as authorization</li>
+    <li>The tenant read from a header or the URL; 403 across tenants</li>
+    <li>Forgetting a JWT still works after logout, until it expires</li>
+  </ul>
+</section>
+
+<!-- ───────────── Interview drill ───────────── -->
+<section id="drill" data-part="14" data-cue="Let's practise">
+  <div class="kicker">Interview drill</div>
+  <h1>Five questions</h1>
+  <p class="lead">After each question, pause and answer out loud. Then compare with the model answer.</p>
+</section>
+
+<section id="q1" data-part="14" data-cue="Where would you store tokens in a single-page app, and why not localStorage?" data-voice="interviewer">
+  <div class="kicker">Question 1 of 5</div>
+  <p class="question">Where would you store tokens in a single-page app, and why not localStorage?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a1" data-part="14" data-cue="Anything script can read, XSS can steal">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>What script can read, XSS can steal; localStorage persists</li>
+    <li>Access token: 15 minutes, in memory, in a signal</li>
+    <li>Refresh token: HttpOnly, SameSite=Strict, /api/auth, rotating</li>
+    <li>A reload restores the session with a silent refresh</li>
+    <li>Stronger still: a token handler, session cookie only</li>
+  </ul>
+</section>
+
+<section id="q2" data-part="14" data-cue="Walk through OIDC authorization code with PKCE. What does PKCE protect against?" data-voice="interviewer">
+  <div class="kicker">Question 2 of 5</div>
+  <p class="question">Walk through OIDC authorization code with PKCE. What does PKCE protect against?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a2" data-part="14" data-cue="The client creates a random code verifier">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Random verifier; send only its hash (challenge) + state</li>
+    <li>User signs in at the identity provider</li>
+    <li>One-time code comes back; check the state</li>
+    <li>Exchange code + verifier; provider checks the challenge</li>
+    <li>Stops code interception; run it from the BFF</li>
+  </ul>
+</section>
+
+<section id="q3" data-part="14" data-cue="What does SameSite=Strict stop, and what doesn't it stop?" data-voice="interviewer">
+  <div class="kicker">Question 3 of 5</div>
+  <p class="question">What does SameSite=Strict stop, and what doesn't it stop?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a3" data-part="14" data-cue="It stops the browser attaching the cookie">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Stops: the cookie on requests another site starts</li>
+    <li>Doesn't stop XSS on your own site</li>
+    <li>Doesn't stop a compromised sibling subdomain</li>
+    <li>Does nothing for a cookie already stolen</li>
+    <li>Cost: email links arrive without it (not here)</li>
+  </ul>
+</section>
+
+<section id="q4" data-part="14" data-cue="Two tabs refresh at the same moment with rotation on. What happens, and how would you fix it?" data-voice="interviewer">
+  <div class="kicker">Question 4 of 5</div>
+  <p class="question">Two tabs refresh at the same moment with rotation on. What happens, and how would you fix it?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a4" data-part="14" data-cue="Each tab shares its own refreshes">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Tabs don't share memory, but do share the cookie jar</li>
+    <li>Same token sent twice: one rotates, one looks reused</li>
+    <li>Every session revoked; a false alarm logged</li>
+    <li>Fix: Web Locks, or one tab + BroadcastChannel</li>
+    <li>Or a short server grace window, slightly less secure</li>
+  </ul>
+</section>
+
+<section id="q5" data-part="14" data-cue="How do you test that a learner can't export reports?" data-voice="interviewer">
+  <div class="kicker">Question 5 of 5</div>
+  <p class="question">How do you test that a learner can't export reports?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a5" data-part="14" data-cue="At the server, because that's where the rule lives">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>At the server: that's where the rule lives</li>
+    <li>Real login as a learner → POST /api/reports → 403</li>
+    <li>Someone else's job → 404, also tested</li>
+    <li>The E2E hidden-link check is UX only</li>
+    <li>At scale: every role × every protected route</li>
+  </ul>
+</section>
+
+<!-- ───────────── Recap ───────────── -->
+<template id="recap">
+  <h2>Five things to remember</h2>
+  <ol class="recap">
+    <li class="item">No storage is safe from both. Access token in memory; refresh token in an HttpOnly, Strict cookie.</li>
+    <li class="item">Refresh tokens are single-use. Replaying a spent one revokes every session.</li>
+    <li class="item">Refresh once, retry once, and share one in-flight refresh between parallel 401s.</li>
+    <li class="item">Guards are UX. The server answers 403 or 404, and tests prove it.</li>
+    <li class="item">Know the gaps: XSS, sibling subdomains, two tabs. Production sign-in: OIDC + PKCE.</li>
+  </ol>
+</template>
+<section id="recap-0" data-part="15" data-cue="Five things to remember" data-template="recap" data-show="0"></section>
+<section id="recap-1" data-part="15" data-cue="One: no storage is safe from both XSS and CSRF" data-template="recap" data-show="1"></section>
+<section id="recap-2" data-part="15" data-cue="Two: refresh tokens are single-use" data-template="recap" data-show="2"></section>
+<section id="recap-3" data-part="15" data-cue="Three: the interceptor refreshes once and retries once" data-template="recap" data-show="3"></section>
+<section id="recap-4" data-part="15" data-cue="Four: guards and hidden links are UX" data-template="recap" data-show="4"></section>
+<section id="recap-5" data-part="15" data-cue="Five: know what your defences don't cover" data-template="recap" data-show="5"></section>
+
+<section id="next" data-part="15" data-cue="In the next lesson">
+  <div class="kicker">Next</div>
+  <h1>09 · Async Jobs, SSE and Polling</h1>
+  <p class="lead">Accept a report with a 202, run it in the background, and stream its progress to the browser.</p>
+</section>
+
+<script src="../assets/slides.js"></script>
+</body>
+</html>

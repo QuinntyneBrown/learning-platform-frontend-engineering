@@ -34,6 +34,8 @@ Run these from the repository root. Node 22.13+ and pnpm 12 are required.
   - `apps/web/src/app/features/`: one folder per lazy-loaded feature
   - `apps/web/e2e/`: Playwright specs
 - `docs/`: study guide and ADRs (`docs/adr/`)
+  - `docs/instructional/`: 12 interview-prep lessons (script, slides, outline, MP3 and MP4 in Git LFS) and the question bank
+- `tools/instructional-audio/`, `tools/instructional-video/`: .NET 10 file-based apps that build the lesson media. They are outside pnpm and CI; see `docs/instructional/README.md`.
 - `.github/workflows/ci.yml`
 
 ## Testing

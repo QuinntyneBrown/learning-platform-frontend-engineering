@@ -1,0 +1,730 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 03 Slides</title>
+<!--
+  Slides for the lesson 03 video. Each <section> is one slide. data-cue is a phrase from script.md:
+  tools/instructional-video/build.cs shows the slide from the moment the narration reaches that phrase.
+  Open this file in a browser and use the arrow keys to step through the deck.
+-->
+<link rel="stylesheet" href="../assets/slides.css">
+</head>
+<body data-lesson-number="03" data-lesson-title="RxJS Races and Idempotent Submits" data-parts="Introduction|The questions|Four operators|The search pipeline|The race|Catching errors|Load more|Enroll|Idempotency key|Retry|URL state|Trade-offs|Traps|Interview drill|Recap">
+
+<!-- ───────────── Intro ───────────── -->
+<section id="title" data-part="0">
+  <div class="kicker">Coursewright frontend · Lesson 03</div>
+  <h1>RxJS Races and<br>Idempotent Submits</h1>
+  <p class="lead">Events over time: a search that survives a slow response, a button that absorbs double clicks, and a key that makes retries safe.</p>
+</section>
+
+<!-- ───────────── Questions ───────────── -->
+<section id="questions" data-part="1" data-cue="The questions this lesson answers">
+  <h2>The questions this lesson answers</h2>
+  <ul>
+    <li>"sig", pause, "nals", and the first response arrives last. Walk through it.</li>
+    <li>switchMap or exhaustMap for a Save button?</li>
+    <li>Why an Idempotency-Key if the button already uses exhaustMap?</li>
+    <li>What happens when an error reaches the outer stream?</li>
+    <li>One key per intent, or one per attempt?</li>
+  </ul>
+</section>
+
+<section id="thesis" data-part="1" data-cue="Keep one sentence in your head while you listen">
+  <div class="kicker">The thesis</div>
+  <p class="quote">A flattening operator is a <span class="accent">concurrency decision</span>. No operator makes a write safe on its own.</p>
+  <p class="muted" style="margin-top:48px">The server has to recognize a repeat.</p>
+</section>
+
+<!-- ───────────── Four operators ───────────── -->
+<section id="ops" data-part="2" data-cue="All four flattening operators do the same basic job">
+  <h2>Same job, different rule when B arrives early</h2>
+  <svg width="1640" height="560" viewBox="0 0 1640 560">
+    <line x1="560" y1="0" x2="560" y2="540" stroke="#38bdf8" stroke-width="2" stroke-dasharray="6 8"/>
+    <line x1="900" y1="0" x2="900" y2="540" stroke="#f5b544" stroke-width="2" stroke-dasharray="6 8"/>
+    <text x="570" y="26" fill="#38bdf8" font-size="24">event A</text>
+    <text x="910" y="26" fill="#f5b544" font-size="24">event B</text>
+    <!-- switchMap -->
+    <text x="0" y="112" fill="#e8eef8" font-size="30" font-weight="600">switchMap</text>
+    <rect x="560" y="86" width="340" height="32" rx="10" fill="#38bdf8"/>
+    <text x="580" y="111" fill="#04121f" font-size="22" font-weight="600">A</text>
+    <text x="885" y="116" fill="#f87171" font-size="40" font-weight="700" text-anchor="middle">×</text>
+    <rect x="900" y="86" width="360" height="32" rx="10" fill="#f5b544"/>
+    <text x="920" y="111" fill="#04121f" font-size="22" font-weight="600">B</text>
+    <text x="1290" y="112" fill="#8ea2c0" font-size="24">A cancelled; newest wins</text>
+    <!-- exhaustMap -->
+    <text x="0" y="232" fill="#e8eef8" font-size="30" font-weight="600">exhaustMap</text>
+    <rect x="560" y="206" width="560" height="32" rx="10" fill="#38bdf8"/>
+    <text x="580" y="231" fill="#04121f" font-size="22" font-weight="600">A</text>
+    <circle cx="900" cy="270" r="14" fill="none" stroke="#f5b544" stroke-width="3"/>
+    <text x="924" y="278" fill="#f5b544" font-size="22">B ignored</text>
+    <text x="1150" y="232" fill="#8ea2c0" font-size="24">A finishes; B never runs</text>
+    <!-- concatMap -->
+    <text x="0" y="372" fill="#e8eef8" font-size="30" font-weight="600">concatMap</text>
+    <rect x="560" y="346" width="560" height="32" rx="10" fill="#38bdf8"/>
+    <text x="580" y="371" fill="#04121f" font-size="22" font-weight="600">A</text>
+    <line x1="900" y1="400" x2="1120" y2="400" stroke="#f5b544" stroke-width="3" stroke-dasharray="8 8"/>
+    <text x="910" y="428" fill="#f5b544" font-size="22">B waits</text>
+    <rect x="1120" y="384" width="340" height="32" rx="10" fill="#f5b544"/>
+    <text x="1140" y="409" fill="#04121f" font-size="22" font-weight="600">B</text>
+    <text x="1480" y="410" fill="#8ea2c0" font-size="24">in order</text>
+    <!-- mergeMap -->
+    <text x="0" y="492" fill="#e8eef8" font-size="30" font-weight="600">mergeMap</text>
+    <rect x="560" y="466" width="560" height="32" rx="10" fill="#38bdf8"/>
+    <text x="580" y="491" fill="#04121f" font-size="22" font-weight="600">A</text>
+    <rect x="900" y="506" width="360" height="32" rx="10" fill="#f5b544"/>
+    <text x="920" y="531" fill="#04121f" font-size="22" font-weight="600">B</text>
+    <text x="1290" y="530" fill="#8ea2c0" font-size="24">both run; any order</text>
+  </svg>
+</section>
+
+<section id="adr-table" data-part="2" data-cue="ADR-0004 puts it in a table">
+  <h2>Pick the operator for its concurrency rule</h2>
+  <table>
+    <tr><th>Operator</th><th>Rule</th><th>Used for</th></tr>
+    <tr><td>switchMap</td><td>The newest wins; cancel the previous one</td><td>Typeahead search, in the catalog store</td></tr>
+    <tr><td>exhaustMap</td><td>Ignore new events while one is in flight</td><td>Enroll button, "Load more"</td></tr>
+    <tr><td>concatMap</td><td>Queue, and run in order</td><td>Ordered saves (not needed here)</td></tr>
+    <tr><td>mergeMap</td><td>Run all at once, optionally with a concurrency limit</td><td>Prefetching (not needed here)</td></tr>
+  </table>
+  <div class="file" style="margin-top:36px">docs/adr/0004-signals-and-rxjs-state.md</div>
+</section>
+
+<section id="reviewer" data-part="2" data-cue="The ADR's positive consequences add the point">
+  <div class="kicker">ADR-0004 · Consequences</div>
+  <p class="quote">Each concurrency decision is one visible operator, which a reviewer can check against the table above.</p>
+</section>
+
+<!-- ───────────── The search pipeline ───────────── -->
+<section id="search-code" data-part="3" data-cue="Open apps/web/src/app/features/catalog/catalog.store.ts">
+  <h2>The search pipeline</h2>
+  <div class="file">apps/web/src/app/features/catalog/catalog.store.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="3,4,5,6,9">search: rxMethod&lt;string&gt;(
+  pipe(
+    debounceTime(250),
+    map((query) =&gt; query.trim()),
+    distinctUntilChanged(),
+    tap((query) =&gt; patchState(store, { query, status: 'loading', error: null })),
+    // switchMap cancels the stale request, so a slow response for an old query can't
+    // arrive late and overwrite the results for the newer one.
+    switchMap((query) =&gt;
+      // …
+    ),
+  ),
+),</pre>
+  <p class="small muted">Fed by the search box's signal (lesson 02): every change becomes an event.</p>
+</section>
+
+<template id="pipe">
+  <h2>Five steps, one keystroke at a time</h2>
+  <div class="steps" style="grid-template-columns:1fr">
+    <div class="step item"><span class="num">1</span>debounceTime(250): nothing passes until the user pauses</div>
+    <div class="step item"><span class="num">2</span>map(trim): "signals " is "signals"</div>
+    <div class="step item"><span class="num">3</span>distinctUntilChanged(): the same query doesn't search again</div>
+    <div class="step item"><span class="num">4</span>tap: status 'loading'; old results stay, dimmed</div>
+    <div class="step item"><span class="num">5</span>switchMap → the request, with its own tap and catchError</div>
+  </div>
+</template>
+<section id="pipe-1" data-part="3" data-cue="First, debounceTime of two hundred and fifty milliseconds" data-template="pipe" data-highlight="1"></section>
+<section id="pipe-2" data-part="3" data-cue="Second, a map that trims the query" data-template="pipe" data-highlight="2-3"></section>
+<section id="pipe-4" data-part="3" data-cue="Fourth, a tap that patches the store" data-template="pipe" data-highlight="4"></section>
+<section id="pipe-5" data-part="3" data-cue="And fifth, switchMap to the API's search call" data-template="pipe" data-highlight="5"></section>
+
+<!-- ───────────── The race ───────────── -->
+<section id="race" data-part="4" data-cue="Now the drill question">
+  <h2>"sig", pause, "nals"</h2>
+  <svg width="1640" height="470" viewBox="0 0 1640 470">
+    <defs><marker id="arrow-r" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <text x="0" y="66" fill="#8ea2c0" font-size="26">typed</text>
+    <text x="0" y="196" fill="#8ea2c0" font-size="26">after debounce</text>
+    <text x="0" y="326" fill="#8ea2c0" font-size="26">requests</text>
+    <line x1="300" y1="84" x2="1640" y2="84" stroke="#22304d" stroke-width="2"/>
+    <line x1="300" y1="186" x2="1640" y2="186" stroke="#22304d" stroke-width="2"/>
+    <text x="330" y="66" fill="#e8eef8" font-size="34" font-family="Cascadia Mono, Consolas, monospace">s i g</text>
+    <text x="460" y="120" fill="#8ea2c0" font-size="22">pause</text>
+    <text x="780" y="66" fill="#e8eef8" font-size="34" font-family="Cascadia Mono, Consolas, monospace">n a l s</text>
+    <text x="970" y="120" fill="#8ea2c0" font-size="22">pause</text>
+    <circle cx="640" cy="186" r="14" fill="#38bdf8"/>
+    <text x="664" y="230" fill="#38bdf8" font-size="26">"sig"</text>
+    <circle cx="1120" cy="186" r="14" fill="#f5b544"/>
+    <text x="1144" y="230" fill="#f5b544" font-size="26">"signals"</text>
+    <rect x="640" y="300" width="480" height="36" rx="10" fill="#38bdf8"/>
+    <text x="660" y="327" fill="#04121f" font-size="24" font-weight="600">GET ?q=sig (slow)</text>
+    <text x="1120" y="332" fill="#f87171" font-size="48" font-weight="700" text-anchor="middle">×</text>
+    <text x="1100" y="376" fill="#f87171" font-size="22" text-anchor="end">switchMap unsubscribes: aborted</text>
+    <line x1="1150" y1="318" x2="1600" y2="318" stroke="#8ea2c0" stroke-width="3" stroke-dasharray="8 8" marker-end="url(#arrow-r)"/>
+    <text x="1150" y="296" fill="#8ea2c0" font-size="22">late answer for "sig": nobody listening</text>
+    <rect x="1120" y="410" width="330" height="36" rx="10" fill="#f5b544"/>
+    <text x="1140" y="437" fill="#04121f" font-size="24" font-weight="600">GET ?q=signals</text>
+    <text x="1470" y="437" fill="#4ade80" font-size="24">shown</text>
+  </svg>
+</section>
+
+<section id="race-code" data-part="4" data-cue="Each keystroke restarts the debounce">
+  <h2>switchMap: unsubscribe first, then subscribe</h2>
+  <div class="file">apps/web/src/app/features/catalog/catalog.store.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,2,3">// switchMap cancels the stale request, so a slow response for an old query can't
+// arrive late and overwrite the results for the newer one.
+switchMap((query) =&gt;
+  api.searchCourses({ q: query }).pipe(
+    tap(({ items, nextCursor }) =&gt;
+      patchState(store, { items, nextCursor, status: 'loaded' }),
+    ),
+    catchError(fail),
+  ),
+),</pre>
+  <p class="small muted">Unsubscribing from an HttpClient request aborts it.</p>
+</section>
+
+<section id="race-alt" data-part="4" data-cue="Compare the alternatives">
+  <h2>The same keystrokes, other operators</h2>
+  <div class="grid7">
+    <div class="card legacy"><h3 class="amber">mergeMap</h3><p>Both live. "sig" lands last and overwrites "signals". The classic race.</p></div>
+    <div class="card legacy"><h3 class="amber">concatMap</h3><p>"signals" waits for the slow "sig". Correct, but slow.</p></div>
+    <div class="card legacy"><h3 class="amber">exhaustMap</h3><p>"signals" is ignored. The user never gets what they asked for.</p></div>
+    <div class="card modern"><h3>switchMap</h3><p>The newest wins. The stale answer can't land.</p></div>
+  </div>
+</section>
+
+<section id="caveat" data-part="4" data-cue="One caveat, and it matters for the rest of this lesson">
+  <div class="kicker">The caveat</div>
+  <p class="quote">Cancelling is <span class="amber">client-side</span>. The server may still run the query.</p>
+  <p class="muted" style="margin-top:48px">For a read, that's harmless. For a write, it's the whole problem.</p>
+</section>
+
+<section id="race-spec" data-part="4" data-cue="The spec proves the race without any timing luck">
+  <h2>A race, tested deterministically</h2>
+  <div class="file">apps/web/src/app/features/catalog/catalog.store.spec.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="10,11">it('drops the slow response for an older query when a newer query is issued', () =&gt; {
+  store.search('react');
+  vi.advanceTimersByTime(250);
+  const stale = http.expectOne((r) =&gt; r.params.get('q') === 'react');
+
+  store.search('angular');
+  vi.advanceTimersByTime(250);
+  const fresh = http.expectOne((r) =&gt; r.params.get('q') === 'angular');
+
+  // switchMap unsubscribed from the old request, which cancels it: it can never land.
+  expect(stale.cancelled).toBe(true);
+  fresh.flush(page('Angular Signals in Practice'));
+  // …
+});</pre>
+  <p class="small muted">Fake timers for the debounce; HttpTestingController for the order. More in lesson 10.</p>
+</section>
+
+<!-- ───────────── Catching errors ───────────── -->
+<section id="err-comment" data-part="5" data-cue="The comment at the top of the store's methods states the rule">
+  <h2>Catch inside, not outside</h2>
+  <div class="file">apps/web/src/app/features/catalog/catalog.store.ts · excerpt</div>
+  <pre class="code" data-lang="ts" data-mark="1,2">// Errors are caught inside each inner request: an error that reached the outer stream
+// would complete it, and the search box would silently stop working.
+const fail = (error: unknown) =&gt; {
+  patchState(store, { status: 'error', error: problemMessage(error) });
+  return EMPTY;
+};</pre>
+</section>
+
+<section id="err-wrong" data-part="5" data-cue="That's how observables work">
+  <h2>An error is terminal</h2>
+  <div class="file">Sketch · not in this repo · the catch in the wrong place</div>
+  <pre class="code tight" data-lang="ts" data-mark="5">pipe(
+  debounceTime(250),
+  distinctUntilChanged(),
+  switchMap((query) =&gt; api.searchCourses({ q: query })),
+  catchError(fail),   // the first failed request completes the whole search stream
+)</pre>
+  <div class="cols">
+    <div class="card legacy"><h3 class="amber">Outer catch</h3><p>One 503 and the pipeline is gone. Keystrokes still set the signal; nothing listens.</p></div>
+    <div class="card modern"><h3>Inner catch</h3><p>That request ends quietly. The error is in state. The stream carries on.</p></div>
+  </div>
+</section>
+
+<section id="err-inside" data-part="5" data-cue="So the catch sits inside the switchMap, on the request">
+  <h2>The catch sits on the request</h2>
+  <div class="file">apps/web/src/app/features/catalog/catalog.store.ts · excerpt</div>
+  <pre class="code" data-lang="ts" data-mark="6">switchMap((query) =&gt;
+  api.searchCourses({ q: query }).pipe(
+    tap(({ items, nextCursor }) =&gt;
+      patchState(store, { items, nextCursor, status: 'loaded' }),
+    ),
+    catchError(fail),
+  ),
+),</pre>
+  <p class="small muted">fail() puts the problem-details message in state and returns EMPTY.</p>
+</section>
+
+<section id="err-spec" data-part="5" data-cue="The third spec proves it">
+  <h2>After a failure, search still works</h2>
+  <div class="file">apps/web/src/app/features/catalog/catalog.store.spec.ts · condensed</div>
+  <pre class="code tight" data-lang="ts" data-mark="10,13,14">it('keeps searching after a failed request', () =&gt; {
+  store.search('a');
+  vi.advanceTimersByTime(250);
+  http
+    .expectOne((r) =&gt; r.url === '/api/courses')
+    .flush(
+      // …
+      { status: 503, statusText: 'Service Unavailable' },
+    );
+  expect(store.status()).toBe('error');
+  store.search('b');
+  vi.advanceTimersByTime(250);
+  http.expectOne((r) =&gt; r.params.get('q') === 'b').flush(page('Accessibility Fundamentals'));
+  expect(store.status()).toBe('loaded');</pre>
+</section>
+
+<!-- ───────────── Load more ───────────── -->
+<section id="lm-code" data-part="6" data-cue="The load-more method is the second pipeline">
+  <h2>Load more: exhaustMap</h2>
+  <div class="file">apps/web/src/app/features/catalog/catalog.store.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="3,4,5,6">loadMore: rxMethod&lt;void&gt;(
+  pipe(
+    filter(() =&gt; store.nextCursor() !== null),
+    // exhaustMap ignores clicks while a page is loading, so the same cursor isn't fetched
+    // twice and pages can't be appended out of order.
+    exhaustMap(() =&gt; {
+      const query = store.query();
+      patchState(store, { loadingMore: true });
+      return api.searchCourses({ q: query, cursor: store.nextCursor() ?? undefined }).pipe(
+        // …
+      );
+    }),
+  ),
+),</pre>
+</section>
+
+<section id="lm-alt" data-part="6" data-cue="Run the alternatives again">
+  <h2>A double click on "Load more"</h2>
+  <div class="grid7">
+    <div class="card legacy"><h3 class="amber">mergeMap</h3><p>The same cursor twice. Duplicate courses appended.</p></div>
+    <div class="card legacy"><h3 class="amber">concatMap</h3><p>The second click is queued. Two pages load.</p></div>
+    <div class="card legacy"><h3 class="amber">switchMap</h3><p>Cancel, refetch the same cursor. May never finish.</p></div>
+    <div class="card modern"><h3>exhaustMap</h3><p>The second click is ignored. One page.</p></div>
+  </div>
+</section>
+
+<section id="lm-guard" data-part="6" data-cue="There's one more guard, and it's the subtle part">
+  <h2>Two streams, one state: guard the stale page</h2>
+  <div class="file">apps/web/src/app/features/catalog/catalog.store.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,5,6">const query = store.query();
+// …
+return api.searchCourses({ q: query, cursor: store.nextCursor() ?? undefined }).pipe(
+  tap(({ items, nextCursor }) =&gt; {
+    // A new search may have started meanwhile; this page belongs to the old one.
+    if (store.query() !== query) return;
+    patchState(store, { items: [...store.items(), ...items], nextCursor });
+  }),
+  catchError(fail),
+  finalize(() =&gt; patchState(store, { loadingMore: false })),
+);</pre>
+  <p class="small muted">A new search doesn't cancel an in-flight page: they're separate streams.</p>
+</section>
+
+<!-- ───────────── Enroll ───────────── -->
+<section id="enroll-code" data-part="7" data-cue="Now a write">
+  <h2>Enroll: exhaustMap for a write</h2>
+  <div class="file">apps/web/src/app/features/course/enrollment-controller.ts · condensed</div>
+  <pre class="code tight" data-lang="ts" data-mark="5,6,7">private readonly intents = new Subject&lt;string&gt;();
+// …
+constructor() {
+  this.intents
+    .pipe(
+      // exhaustMap, not switchMap: a second click must not cancel an in-flight enrollment
+      // (the server may already have done the work), nor start a second one. It is ignored.
+      exhaustMap((courseId) =&gt; this.send(courseId)),
+      takeUntilDestroyed(),
+    )
+    .subscribe();
+}</pre>
+  <p class="small muted">Provided by the course page; clicks call enroll(courseId), which calls intents.next().</p>
+</section>
+
+<section id="save-wrong" data-part="7" data-cue="That's why switch map is wrong for a Save button">
+  <h2>switchMap on a Save button</h2>
+  <svg width="1640" height="560" viewBox="0 0 1640 560">
+    <defs>
+      <marker id="arrow-s" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker>
+      <marker id="arrow-sa" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#f5b544"/></marker>
+    </defs>
+    <rect x="160" y="0" width="300" height="60" rx="14" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="310" y="40" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">Browser</text>
+    <rect x="1180" y="0" width="300" height="60" rx="14" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="1330" y="40" fill="#e8eef8" font-size="28" font-weight="600" text-anchor="middle">Server</text>
+    <line x1="310" y1="60" x2="310" y2="540" stroke="#22304d" stroke-width="3"/>
+    <line x1="1330" y1="60" x2="1330" y2="540" stroke="#22304d" stroke-width="3"/>
+    <line x1="310" y1="110" x2="1318" y2="110" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-s)"/>
+    <text x="340" y="98" fill="#e8eef8" font-size="24">click 1: POST</text>
+    <text x="1350" y="170" fill="#f5b544" font-size="24">saves #1</text>
+    <text x="330" y="210" fill="#f87171" font-size="24">click 2: switchMap drops #1</text>
+    <line x1="310" y1="260" x2="1318" y2="260" stroke="#8ea2c0" stroke-width="3" marker-end="url(#arrow-s)"/>
+    <text x="340" y="248" fill="#e8eef8" font-size="24">POST again</text>
+    <text x="1350" y="320" fill="#f5b544" font-size="24">saves #2</text>
+    <line x1="1330" y1="370" x2="322" y2="370" stroke="#8ea2c0" stroke-width="3" stroke-dasharray="8 8" marker-end="url(#arrow-s)"/>
+    <text x="1300" y="358" fill="#8ea2c0" font-size="24" text-anchor="end">response #1: nobody listening</text>
+    <line x1="1330" y1="450" x2="322" y2="450" stroke="#f5b544" stroke-width="3" marker-end="url(#arrow-sa)"/>
+    <text x="1300" y="438" fill="#f5b544" font-size="24" text-anchor="end">response #2: shown</text>
+    <text x="820" y="530" fill="#e8eef8" font-size="30" font-weight="600" text-anchor="middle">The screen shows one result. The database has two.</text>
+  </svg>
+</section>
+
+<section id="busy" data-part="7" data-cue="On the course page, the button's comment completes the picture">
+  <h2>Busy, never disabled, and tested</h2>
+  <div class="file">apps/web/src/app/features/course/course-page.html · excerpt</div>
+  <pre class="code tight" data-lang="html" data-mark="1">&lt;!-- Busy, never disabled: a double-click must reach exhaustMap, which absorbs it. --&gt;
+&lt;button
+  cwButton
+  type="button"
+  [busy]="enrollment.status() === 'pending'"
+  (click)="enrollment.enroll(details.id)"
+&gt;</pre>
+  <div class="file">apps/web/src/app/features/course/enrollment-controller.spec.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,5">it('sends one request for a double-click (exhaustMap ignores the second intent)', () =&gt; {
+  controller.enroll('c1');
+  controller.enroll('c1');
+
+  const request = http.expectOne('/api/enrollments');</pre>
+</section>
+
+<!-- ───────────── Idempotency key ───────────── -->
+<section id="why-key" data-part="8" data-cue="So if exhaust map already ignores the second click">
+  <h2>What exhaustMap can't see</h2>
+  <div class="cols">
+    <div class="card modern">
+      <h3>It sees</h3>
+      <ul><li>Overlapping clicks in one stream, in one tab</li></ul>
+    </div>
+    <div class="card legacy">
+      <h3 class="amber">It can't see</h3>
+      <ul>
+        <li>A retry after a lost response</li>
+        <li>A second tab</li>
+        <li>A reload, then another click</li>
+        <li>A proxy that retries</li>
+      </ul>
+    </div>
+  </div>
+  <p class="muted" style="margin-top:36px">Only the server can recognize the same intent twice.</p>
+</section>
+
+<section id="send-code" data-part="8" data-cue="Look at the send method">
+  <h2>One key per intent</h2>
+  <div class="file">apps/web/src/app/features/course/enrollment-controller.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2,3,4,5">private send(courseId: string) {
+  // One key per intent, reused by every retry: if a response is lost and the retry reaches
+  // the server, the server recognizes the key and replays the first result instead of
+  // enrolling twice.
+  const idempotencyKey = crypto.randomUUID();
+  this.status.set('pending');
+  this.error.set(null);
+
+  return this.api.enroll(courseId, idempotencyKey).pipe(</pre>
+  <div class="file">apps/web/src/app/core/api/coursewright-api.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2">return this.http.post&lt;Enrollment&gt;('/api/enrollments', body, {
+  headers: { 'Idempotency-Key': idempotencyKey },
+});</pre>
+</section>
+
+<section id="server" data-part="8" data-cue="On the server, in apps/bff/src/routes/enrollments.ts">
+  <h2>What the server does with it</h2>
+  <table>
+    <tr><th>Request</th><th>Response</th></tr>
+    <tr><td>new key</td><td>Enroll normally: 201, or 404 / 409 as a problem</td></tr>
+    <tr><td>same key, same body</td><td>Replay the stored response, with Idempotency-Replayed: true</td></tr>
+    <tr><td>same key, other body</td><td>422: "Idempotency key reused"</td></tr>
+  </table>
+  <p class="small muted" style="margin-top:32px">Stored per user: the key, a hash of the request, the status and body. Lesson 07 owns this side.</p>
+  <div class="file">apps/bff/src/routes/enrollments.ts</div>
+</section>
+
+<section id="per-intent" data-part="8" data-cue="Now the per-intent question">
+  <h2>Per intent, not per attempt</h2>
+  <svg width="1640" height="400" viewBox="0 0 1640 400">
+    <defs><marker id="arrow-k" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <text x="0" y="30" fill="#38bdf8" font-size="28" font-weight="600">One key per intent (Coursewright)</text>
+    <rect x="0" y="60" width="360" height="100" rx="16" fill="#0f2233" stroke="#1f5f7f" stroke-width="3"/>
+    <text x="180" y="104" fill="#e8eef8" font-size="26" text-anchor="middle">POST · key A</text>
+    <text x="180" y="138" fill="#8ea2c0" font-size="22" text-anchor="middle">response lost</text>
+    <line x1="365" y1="110" x2="448" y2="110" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-k)"/>
+    <rect x="460" y="60" width="360" height="100" rx="16" fill="#0f2233" stroke="#1f5f7f" stroke-width="3"/>
+    <text x="640" y="104" fill="#e8eef8" font-size="26" text-anchor="middle">retry · key A</text>
+    <text x="640" y="138" fill="#8ea2c0" font-size="22" text-anchor="middle">same intent</text>
+    <line x1="825" y1="110" x2="908" y2="110" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-k)"/>
+    <rect x="920" y="60" width="720" height="100" rx="16" fill="#0f2233" stroke="#38bdf8" stroke-width="3"/>
+    <text x="1280" y="104" fill="#e8eef8" font-size="26" text-anchor="middle">server knows key A</text>
+    <text x="1280" y="138" fill="#38bdf8" font-size="22" text-anchor="middle">replays the first result</text>
+    <text x="0" y="240" fill="#f5b544" font-size="28" font-weight="600">A new key per attempt</text>
+    <rect x="0" y="270" width="360" height="100" rx="16" fill="#121b2f" stroke="#6b5220" stroke-width="3"/>
+    <text x="180" y="314" fill="#e8eef8" font-size="26" text-anchor="middle">POST · key A</text>
+    <text x="180" y="348" fill="#8ea2c0" font-size="22" text-anchor="middle">response lost</text>
+    <line x1="365" y1="320" x2="448" y2="320" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-k)"/>
+    <rect x="460" y="270" width="360" height="100" rx="16" fill="#121b2f" stroke="#6b5220" stroke-width="3"/>
+    <text x="640" y="314" fill="#e8eef8" font-size="26" text-anchor="middle">retry · key B</text>
+    <text x="640" y="348" fill="#8ea2c0" font-size="22" text-anchor="middle">looks new</text>
+    <line x1="825" y1="320" x2="908" y2="320" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-k)"/>
+    <rect x="920" y="270" width="720" height="100" rx="16" fill="#121b2f" stroke="#f5b544" stroke-width="3"/>
+    <text x="1280" y="314" fill="#e8eef8" font-size="26" text-anchor="middle">server sees a new request</text>
+    <text x="1280" y="348" fill="#f5b544" font-size="22" text-anchor="middle">does the work again, unless something else catches it</text>
+  </svg>
+  <p class="small muted">The key is created in send(); retry() resubscribes to the same request, so every retry carries it.</p>
+</section>
+
+<section id="key-spec" data-part="8" data-cue="The spec has a test for each">
+  <h2>Same key on retry, new key for a new intent</h2>
+  <div class="file">apps/web/src/app/features/course/enrollment-controller.spec.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="10">it('retries a 5xx with the same Idempotency-Key', () =&gt; {
+  controller.enroll('c1');
+  const first = http.expectOne('/api/enrollments');
+  const key = first.request.headers.get('Idempotency-Key');
+  // …
+  first.flush(null, { status: 503, statusText: 'Service Unavailable' });
+  vi.advanceTimersByTime(backoff(1));
+
+  const retry = http.expectOne('/api/enrollments');
+  expect(retry.request.headers.get('Idempotency-Key')).toBe(key);
+  // …
+});</pre>
+  <p class="small muted">And "uses a new key for a new intent": a click after a 404 sends a different key.</p>
+</section>
+
+<!-- ───────────── Retry ───────────── -->
+<section id="retry-code" data-part="9" data-cue="The retry itself is small">
+  <h2>Retry transient errors, with backoff</h2>
+  <div class="file">apps/web/src/app/features/course/enrollment-controller.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,5,9,10,11">/** Retry network failures and 5xx only; a 4xx won't change by asking again. */
+const isTransient = (error: unknown) =&gt;
+  error instanceof HttpErrorResponse &amp;&amp; (error.status === 0 || error.status &gt;= 500);
+
+/** 300 ms, then 600 ms. */
+export const backoff = (retryCount: number) =&gt; 300 * 2 ** (retryCount - 1);
+// …
+retry({
+  count: 2,
+  delay: (error, retryCount) =&gt;
+    isTransient(error) ? timer(backoff(retryCount)) : throwError(() =&gt; error),
+}),</pre>
+  <p class="small muted">At most three attempts. A 4xx is rethrown at once.</p>
+</section>
+
+<section id="retry-409" data-part="9" data-cue="After the retry, a four hundred and nine means already enrolled">
+  <h2>409 is success; the catch is inside</h2>
+  <div class="file">apps/web/src/app/features/course/enrollment-controller.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="3,4,5,10">tap(() =&gt; this.succeed()),
+catchError((error: unknown) =&gt; {
+  // 409: already enrolled (say, from another tab). For the user, that's success.
+  if (error instanceof HttpErrorResponse &amp;&amp; error.status === 409) {
+    this.succeed();
+  } else {
+    this.status.set('error');
+    this.error.set(problemMessage(error));
+  }
+  return EMPTY;
+}),</pre>
+  <p class="small muted">Inside send(), so the intents stream survives and the next click still works.</p>
+</section>
+
+<section id="retry-key" data-part="9" data-cue="Say the key point plainly in an interview">
+  <div class="kicker">Say it plainly</div>
+  <p class="quote">Retrying a POST is only safe because of the <span class="accent">key</span>.</p>
+  <p class="muted" style="margin-top:48px">Without it, a retry after a timeout is exactly how duplicates happen.</p>
+</section>
+
+<!-- ───────────── URL state ───────────── -->
+<section id="url-code" data-part="10" data-cue="The last piece is the URL">
+  <h2>The query lives in the URL</h2>
+  <div class="file">apps/web/src/app/features/catalog/catalog-page.ts · excerpt</div>
+  <pre class="code" data-lang="ts" data-mark="4,7">protected onSearch(value: string): void {
+  this.query.set(value);
+  // replaceUrl: one history entry for the page, not one per keystroke.
+  void this.router.navigate([], {
+    relativeTo: this.route,
+    queryParams: { q: value || null },
+    replaceUrl: true,
+  });
+}</pre>
+  <p class="small muted">value || null: an empty box removes ?q= entirely.</p>
+</section>
+
+<section id="url-history" data-part="10" data-cue="would leave seven history entries">
+  <h2>replaceUrl keeps Back useful</h2>
+  <div class="cols">
+    <div class="card legacy">
+      <h3 class="amber">Push per keystroke</h3>
+      <p class="small" style="font-family:'Cascadia Mono',Consolas,monospace">?q=s · ?q=si · ?q=sig · ?q=sign<br>?q=signa · ?q=signal · ?q=signals</p>
+      <p>Back steps through the letters.</p>
+    </div>
+    <div class="card modern">
+      <h3>replaceUrl</h3>
+      <p class="small" style="font-family:'Cascadia Mono',Consolas,monospace">?q=signals</p>
+      <p>One entry for the page. Back leaves it.</p>
+    </div>
+  </div>
+</section>
+
+<section id="url-debounce" data-part="10" data-cue="Notice that the URL updates on every keystroke">
+  <h2>Only the request is debounced</h2>
+  <div class="cols">
+    <div class="card"><h3>The URL</h3><p>Every keystroke. Same route, same page instance: cheap.</p></div>
+    <div class="card"><h3>The request</h3><p>After a 250 ms pause, trimmed and de-duplicated by the store.</p></div>
+  </div>
+</section>
+
+<section id="url-state" data-part="10" data-cue="URL state is state">
+  <h2>URL state is state</h2>
+  <ul class="checks">
+    <li>Survives a reload</li>
+    <li>Can be bookmarked and shared</li>
+    <li>Back restores it</li>
+  </ul>
+  <div class="file" style="margin-top:24px">apps/web/e2e/learner-journey.spec.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts">await expect(page).toHaveURL(/[?&amp;]q=signals/);
+// …
+await page.goto('/catalog?q=forms');
+// …
+await expect(page).toHaveURL(/\/catalog\?q=forms/);</pre>
+  <p class="small muted">A deep link that survives sign-in: lesson 04.</p>
+</section>
+
+<!-- ───────────── Trade-offs ───────────── -->
+<section id="tradeoffs" data-part="11" data-cue="The trade-off of RxJS is the learning curve">
+  <h2>The trade-off</h2>
+  <div class="cols">
+    <div class="card legacy"><h3 class="amber">Cost</h3><p>A learning curve, and two reactive models: "state or event?" is a review question.</p></div>
+    <div class="card modern"><h3>Payoff</h3><p>Each concurrency decision is one visible, testable operator.</p></div>
+  </div>
+</section>
+
+<section id="production" data-part="11" data-cue="Production would add jitter to the backoff">
+  <h2>What production would add</h2>
+  <ul>
+    <li>Jitter on the backoff, so clients don't retry in lockstep</li>
+    <li>Respect Retry-After on a 429</li>
+    <li>Server-side timeouts: client cancellation doesn't stop server work</li>
+  </ul>
+</section>
+
+<!-- ───────────── Traps ───────────── -->
+<section id="traps" data-part="12" data-cue="Switch map on a write">
+  <h2>Traps</h2>
+  <ul class="small">
+    <li>switchMap on a write: it cancels your interest, not the request</li>
+    <li>catchError on the outer stream: the feature dies silently</li>
+    <li>A new key per attempt, e.g. from an interceptor (retries pass through it)</li>
+    <li>Debouncing a submit: every legitimate click waits</li>
+    <li>Disabling the button instead of absorbing duplicates</li>
+    <li>Retrying 4xx errors</li>
+    <li>Two streams writing the same state with no guard</li>
+  </ul>
+</section>
+
+<!-- ───────────── Interview drill ───────────── -->
+<section id="drill" data-part="13" data-cue="Let's practise">
+  <div class="kicker">Interview drill</div>
+  <h1>Five questions</h1>
+  <p class="lead">After each question, pause and answer out loud. Then compare with the model answer.</p>
+</section>
+
+<section id="q1" data-part="13" data-cue="Walk through what happens when a user types" data-voice="interviewer">
+  <div class="kicker">Question 1 of 5</div>
+  <p class="question">A user types "sig", pauses, types "nals", and the first response arrives last. Walk through it.</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a1" data-part="13" data-cue="After a two hundred and fifty millisecond pause">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>"sig" passes debounce and distinct; switchMap requests it</li>
+    <li>"nals" restarts the debounce; "signals" passes</li>
+    <li>switchMap unsubscribes: the "sig" request is aborted</li>
+    <li>The late answer has no listener, so it can't overwrite</li>
+    <li>Proved with fake timers + HttpTestingController</li>
+  </ul>
+</section>
+
+<section id="q2" data-part="13" data-cue="switchMap or exhaustMap for a Save button?" data-voice="interviewer">
+  <div class="kicker">Question 2 of 5</div>
+  <p class="question">switchMap or exhaustMap for a Save button?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a2" data-part="13" data-cue="Exhaust map, if the clicks repeat one intent">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>exhaustMap: ignore clicks while the save is in flight</li>
+    <li>switchMap cancels only the client's interest; both saves can commit</li>
+    <li>concatMap when each click is different data, in order</li>
+    <li>Enroll: exhaustMap, busy not disabled</li>
+  </ul>
+</section>
+
+<section id="q3" data-part="13" data-cue="Why is an Idempotency-Key needed if the button already uses exhaustMap?" data-voice="interviewer">
+  <div class="kicker">Question 3 of 5</div>
+  <p class="question">Why is an Idempotency-Key needed if the button already uses exhaustMap?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a3" data-part="13" data-cue="Because exhaust map only sees one stream in one tab">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>exhaustMap sees one stream in one tab</li>
+    <li>Not: a lost response + retry, a second tab, a reload, a proxy</li>
+    <li>Only the server can recognize a repeat</li>
+    <li>Same key replays; same key, other body: 422</li>
+  </ul>
+</section>
+
+<section id="q4" data-part="13" data-cue="What happens when an error reaches the outer stream?" data-voice="interviewer">
+  <div class="kicker">Question 4 of 5</div>
+  <p class="question">What happens when an error reaches the outer stream?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a4" data-part="13" data-cue="The stream errors, and an error is terminal">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>An error is terminal: the pipeline is torn down</li>
+    <li>Later keystrokes go nowhere, silently</li>
+    <li>Catch inside switchMap; fail() → state + EMPTY</li>
+    <li>A spec: after a 503, the next search loads</li>
+  </ul>
+</section>
+
+<section id="q5" data-part="13" data-cue="One idempotency key per intent, or one per attempt?" data-voice="interviewer">
+  <div class="kicker">Question 5 of 5</div>
+  <p class="question">One idempotency key per intent, or one per attempt?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a5" data-part="13" data-cue="Per intent. A key per attempt makes every retry look like a new request">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Per intent; per attempt recreates the duplicate</li>
+    <li>Created in send(), once per accepted click</li>
+    <li>retry() resubscribes, so retries reuse it</li>
+    <li>New click after a failure: new key</li>
+    <li>Beware interceptors that stamp a fresh key</li>
+  </ul>
+</section>
+
+<!-- ───────────── Recap ───────────── -->
+<template id="recap">
+  <h2>Five things to remember</h2>
+  <ol class="recap">
+    <li class="item">A flattening operator is a concurrency decision.</li>
+    <li class="item">Debounce, trim, distinct, switch: a stale answer can't land.</li>
+    <li class="item">Catch inside the inner observable; outer errors are terminal.</li>
+    <li class="item">exhaustMap absorbs double clicks; one key per intent makes retries safe.</li>
+    <li class="item">URL state is state; replaceUrl keeps history clean.</li>
+  </ol>
+</template>
+<section id="recap-0" data-part="14" data-cue="Five things to remember" data-template="recap" data-show="0"></section>
+<section id="recap-1" data-part="14" data-cue="One: a flattening operator is a concurrency decision" data-template="recap" data-show="1"></section>
+<section id="recap-2" data-part="14" data-cue="Two: the search pipeline debounces, trims, de-duplicates, and switches" data-template="recap" data-show="2"></section>
+<section id="recap-3" data-part="14" data-cue="Three: catch errors inside the inner observable" data-template="recap" data-show="3"></section>
+<section id="recap-4" data-part="14" data-cue="Four: exhaust map absorbs a double click" data-template="recap" data-show="4"></section>
+<section id="recap-5" data-part="14" data-cue="Five: URL state is state" data-template="recap" data-show="5"></section>
+
+<section id="next" data-part="14" data-cue="In the next lesson">
+  <div class="kicker">Next</div>
+  <h1>04 · Routing, Guards and Deep Links</h1>
+  <p class="lead">Why the guards use canMatch, why they return a UrlTree, and how a deep link survives a sign-in.</p>
+</section>
+
+<script src="../assets/slides.js"></script>
+</body>
+</html>

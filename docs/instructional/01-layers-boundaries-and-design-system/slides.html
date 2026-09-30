@@ -1,0 +1,595 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 01 Slides</title>
+<!--
+  Slides for the lesson 01 video. Each <section> is one slide. data-cue is a phrase from script.md:
+  tools/instructional-video/build.cs shows the slide from the moment the narration reaches that phrase.
+  Open this file in a browser and use the arrow keys to step through the deck.
+-->
+<link rel="stylesheet" href="../assets/slides.css">
+</head>
+<body data-lesson-number="01" data-lesson-title="Layers, Boundaries and the Design System" data-parts="Introduction|The questions|How frontends fail|The four layers|Executable boundaries|Tokens|Primitives|Smart and presentational|Evolving the design system|Traps|Interview drill|Recap">
+
+<!-- ───────────── Intro ───────────── -->
+<section id="title" data-part="0">
+  <div class="kicker">Coursewright frontend · Lesson 01</div>
+  <h1>Layers, Boundaries and<br>the Design System</h1>
+  <p class="lead">How a large Angular app stays changeable: one-way layers, rules the build enforces, and primitives that keep the browser's behaviour.</p>
+</section>
+
+<!-- ───────────── Questions ───────────── -->
+<section id="questions" data-part="1" data-cue="The questions this lesson answers">
+  <h2>The questions this lesson answers</h2>
+  <ul>
+    <li>How do you structure a large Angular app so it stays maintainable?</li>
+    <li>Why is the button an attribute selector, not an element?</li>
+    <li>Two features need the same course card: where does it go?</li>
+    <li>How do tokens support per-tenant branding without a build per tenant?</li>
+    <li>How do you roll out a breaking change used in 200 places?</li>
+  </ul>
+</section>
+
+<section id="thesis" data-part="1" data-cue="Keep one sentence in your head while you listen">
+  <div class="kicker">The thesis</div>
+  <p class="quote">Architecture that isn't <span class="accent">executable</span> erodes.</p>
+  <p class="muted" style="margin-top:48px">The right thing is the easy thing. The wrong thing fails the build.</p>
+</section>
+
+<!-- ───────────── How frontends fail ───────────── -->
+<section id="erosion" data-part="2" data-cue="Start with the failure mode">
+  <h2>Large frontends fail by erosion</h2>
+  <ul>
+    <li>A feature imports a helper from another feature's folder</li>
+    <li>The design system injects an application service</li>
+    <li>Each change is reasonable, and passes review</li>
+    <li class="amber">A year later, nothing moves without breaking something else</li>
+  </ul>
+</section>
+
+<section id="adr-options" data-part="2" data-cue="The architecture decision record for this repository">
+  <h2>ADR-0001: three setups considered</h2>
+  <div class="cols3">
+    <div class="card"><h3>Separate repos</h3><p>Web app and BFF apart. But the contract, the route and the feature change in one PR.</p></div>
+    <div class="card"><h3>Nx monorepo</h3><p>Libraries, tags, module-boundary rule. More than this size needs.</p></div>
+    <div class="card modern"><h3>pnpm workspace + ESLint</h3><p>Angular CLI app, BFF and contracts together. Boundaries enforced by lint.</p></div>
+  </div>
+  <div class="file" style="margin-top:36px">docs/adr/0001-workspace-and-boundaries.md</div>
+</section>
+
+<!-- ───────────── The four layers ───────────── -->
+<section id="layers" data-part="3" data-cue="Inside the web app, folders are the architecture">
+  <h2>Folders are the architecture</h2>
+  <svg width="1640" height="560" viewBox="0 0 1640 560">
+    <defs><marker id="arrow-l" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8ea2c0"/></marker></defs>
+    <rect x="0" y="0" width="300" height="130" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="150" y="60" fill="#e8eef8" font-size="32" font-weight="600" text-anchor="middle">shell/</text>
+    <text x="150" y="100" fill="#8ea2c0" font-size="22" text-anchor="middle">skip link · header · main</text>
+    <rect x="340" y="0" width="1300" height="130" rx="18" fill="#121b2f" stroke="#38bdf8" stroke-width="3"/>
+    <text x="370" y="38" fill="#8ea2c0" font-size="22">features/ · lazy-loaded · never import each other</text>
+    <rect x="370" y="56" width="220" height="56" rx="12" fill="#0f2233" stroke="#1f5f7f"/><text x="480" y="93" fill="#e8eef8" font-size="26" text-anchor="middle">login</text>
+    <rect x="620" y="56" width="220" height="56" rx="12" fill="#0f2233" stroke="#1f5f7f"/><text x="730" y="93" fill="#e8eef8" font-size="26" text-anchor="middle">catalog</text>
+    <rect x="870" y="56" width="220" height="56" rx="12" fill="#0f2233" stroke="#1f5f7f"/><text x="980" y="93" fill="#e8eef8" font-size="26" text-anchor="middle">course</text>
+    <rect x="1120" y="56" width="220" height="56" rx="12" fill="#0f2233" stroke="#1f5f7f"/><text x="1230" y="93" fill="#e8eef8" font-size="26" text-anchor="middle">reports</text>
+    <rect x="1370" y="56" width="240" height="56" rx="12" fill="#0f2233" stroke="#1f5f7f"/><text x="1490" y="93" fill="#e8eef8" font-size="26" text-anchor="middle">not-found</text>
+    <line x1="150" y1="135" x2="150" y2="205" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-l)"/>
+    <line x1="990" y1="135" x2="990" y2="205" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-l)"/>
+    <rect x="0" y="215" width="1640" height="120" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="40" y="268" fill="#e8eef8" font-size="32" font-weight="600">core/</text>
+    <text x="40" y="310" fill="#8ea2c0" font-size="24">@cw/core · API client · auth store + interceptor · guards · errors · observability</text>
+    <line x1="820" y1="340" x2="820" y2="410" stroke="#8ea2c0" stroke-width="4" marker-end="url(#arrow-l)"/>
+    <rect x="0" y="420" width="1640" height="120" rx="18" fill="#121b2f" stroke="#22304d" stroke-width="2"/>
+    <text x="40" y="473" fill="#e8eef8" font-size="32" font-weight="600">design-system/</text>
+    <text x="40" y="515" fill="#8ea2c0" font-size="24">@cw/design-system · tokens · button · text field · card · progress · live announcer</text>
+  </svg>
+  <p class="small muted" style="margin-top:12px">Arrows point the only way imports may go.</p>
+</section>
+
+<template id="rules">
+  <h2>What each layer may import</h2>
+  <table>
+    <tr><th>Folder</th><th>May import</th><th>Must not import</th></tr>
+    <tr class="item"><td>design-system/</td><td>nothing from the app</td><td>core, features, shell</td></tr>
+    <tr class="item"><td>core/</td><td>design-system</td><td>features, shell</td></tr>
+    <tr class="item"><td>shell/</td><td>core, design-system</td><td>features</td></tr>
+    <tr class="item"><td>features/&lt;name&gt;/</td><td>core, design-system</td><td>other features, shell</td></tr>
+  </table>
+  <div class="file" style="margin-top:36px">docs/adr/0001-workspace-and-boundaries.md</div>
+</template>
+<section id="rules-1" data-part="3" data-cue="The design system depends on nothing in the app" data-template="rules" data-highlight="1"></section>
+<section id="rules-2" data-part="3" data-cue="Core may use the design system, but never a feature" data-template="rules" data-highlight="2"></section>
+<section id="rules-3" data-part="3" data-cue="The shell may use core and the design system" data-template="rules" data-highlight="3"></section>
+<section id="rules-4" data-part="3" data-cue="And each feature may use core and the design system" data-template="rules" data-highlight="4"></section>
+
+<section id="down-not-sideways" data-part="3" data-cue="The rule to remember is that shared code moves down a layer">
+  <div class="kicker">The rule to remember</div>
+  <p class="quote">Shared code moves <span class="accent">down</span> a layer. It's never imported <span class="amber">sideways</span>.</p>
+  <div class="cols" style="margin-top:56px">
+    <div class="card"><h3>A service?</h3><p>Into core.</p></div>
+    <div class="card"><h3>Presentational?</h3><p>Into the design system.</p></div>
+  </div>
+</section>
+
+<section id="aliases" data-part="3" data-cue="Core and the design system are reached through path aliases">
+  <h2>Each layer has a public surface</h2>
+  <div class="file">apps/web/tsconfig.json</div>
+  <pre class="code tight" data-lang="json" data-mark="2,3">"paths": {
+  "@cw/core": ["./src/app/core/index.ts"],
+  "@cw/design-system": ["./src/app/design-system/index.ts"],
+  "@cw/design-system/forms": ["./src/app/design-system/forms.ts"]
+},</pre>
+  <div class="file">apps/web/src/app/core/index.ts</div>
+  <pre class="code tight" data-lang="ts" data-mark="3">export * from './api/models';
+export { CoursewrightApi } from './api/coursewright-api';
+export { AuthStore } from './auth/auth.store';
+export { authInterceptor } from './auth/auth.interceptor';
+export { authGuard, roleGuard } from './auth/guards';</pre>
+</section>
+
+<!-- ───────────── Executable boundaries ───────────── -->
+<section id="eslint-comment" data-part="4" data-cue="Now the part that makes this more than a diagram on a wiki">
+  <h2>The rules, in the lint config</h2>
+  <div class="file">apps/web/eslint.config.js</div>
+  <pre class="code" data-lang="js" data-mark="2,3,4,5,8">// Architectural boundaries, enforced by lint rather than by convention:
+//   design-system  -&gt; depends on nothing in the app
+//   core           -&gt; may use design-system; never features or shell
+//   features/&lt;x&gt;   -&gt; may use core and design-system; never another feature
+//   shell          -&gt; may use core and design-system
+
+const restrict = (regex, message) =&gt; ({
+  'no-restricted-imports': ['error', { patterns: [{ regex, message }] }],
+});</pre>
+</section>
+
+<section id="per-feature" data-part="4" data-cue="The design-system block forbids">
+  <h2>One rule per feature, generated</h2>
+  <div class="file">apps/web/eslint.config.js</div>
+  <pre class="code tight" data-lang="js" data-mark="3,4,5,6,7,8,9">const features = featureNames();
+// …
+...features.map((feature) =&gt; ({
+  files: [`src/app/features/${feature}/**/*.ts`],
+  rules: restrict(
+    `(^|/)(${[...features.filter((f) =&gt; f !== feature), 'shell'].join('|')})/`,
+    'A feature must not import another feature or the shell. Move shared code to core or the design system.',
+  ),
+})),</pre>
+  <p class="small muted"><span class="accent">featureNames()</span> reads the features folder when lint runs, so a sixth feature is covered automatically.</p>
+</section>
+
+<section id="messages" data-part="4" data-cue="The messages matter as much as the patterns">
+  <h2>Errors that teach</h2>
+  <div class="card legacy">
+    <p class="small muted" style="margin-bottom:12px">pnpm lint, after adding an import of ../catalog/catalog.store to features/course/course-page.ts</p>
+    <p class="amber small">error  '../catalog/catalog.store' import is restricted from being used by a pattern. A feature must not import another feature or the shell. Move shared code to core or the design system  no-restricted-imports</p>
+  </div>
+  <p class="muted" style="margin-top:40px">The architecture is explained at the moment someone needs it, not by a reviewer for the fifth time.</p>
+</section>
+
+<section id="guardrails" data-part="4" data-cue="The same file adds two more guardrails">
+  <h2>Two more guardrails</h2>
+  <div class="file">apps/web/eslint.config.js</div>
+  <pre class="code tight" data-lang="js" data-mark="4,5,11">// Elements (cw-card), plus attribute components on native elements (button[cwButton]).
+'@angular-eslint/component-selector': [
+  'error',
+  [
+    { type: 'element', prefix: 'cw', style: 'kebab-case' },
+    { type: 'attribute', prefix: 'cw', style: 'camelCase' },
+  ],
+],
+// …
+files: ['**/*.html'],
+extends: [angular.configs.templateRecommended, angular.configs.templateAccessibility],</pre>
+  <p class="small muted"><span class="accent">pnpm lint</span> runs in CI: a violation is a failed build, not a review comment.</p>
+</section>
+
+<section id="limits" data-part="4" data-cue="Be honest about the limits, because the ADR is">
+  <h2>Be honest about the limits</h2>
+  <div class="cols">
+    <div class="card legacy">
+      <h3 class="amber">What lint can't do</h3>
+      <ul>
+        <li>Checks import paths, not a dependency graph</li>
+        <li>A creative relative path can dodge it</li>
+        <li>No project graph: CI runs everything</li>
+      </ul>
+    </div>
+    <div class="card modern">
+      <h3>When to revisit (Nx or libraries)</h3>
+      <ul>
+        <li>More than one app</li>
+        <li>CI time dominated by work a change didn't touch</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── Tokens ───────────── -->
+<section id="tokens" data-part="5" data-cue="The design system starts with tokens">
+  <h2>Tokens: CSS custom properties</h2>
+  <div class="file">apps/web/src/app/design-system/tokens.css · excerpt</div>
+  <pre class="code tight" data-lang="css" data-mark="2,3">/*
+ * Design tokens. Components read only these custom properties, so a theme (or a tenant's
+ * brand) is a matter of redefining them. Every text/background pair meets WCAG AA (4.5:1);
+ * borders of form controls and the focus ring meet the 3:1 non-text contrast minimum.
+ */
+:root {
+  --cw-color-bg: #ffffff;
+  --cw-color-text: #1b1f24;
+  --cw-color-primary: #1d4ed8;
+  --cw-space-4: 1rem;
+  --cw-radius-md: 0.5rem;
+  --cw-focus-ring: 3px solid var(--cw-color-focus);
+}</pre>
+</section>
+
+<section id="dark-mode" data-part="5" data-cue="Dark mode shows how that works">
+  <h2>Dark mode: same properties, new values</h2>
+  <div class="file">apps/web/src/app/design-system/tokens.css · excerpt</div>
+  <pre class="code" data-lang="css" data-mark="1">@media (prefers-color-scheme: dark) {
+  :root {
+    --cw-color-bg: #111418;
+    --cw-color-text: #e6e9ef;
+    --cw-color-primary: #8ab4ff;
+    --cw-color-on-primary: #0b1220;
+  }
+}</pre>
+  <p class="muted">No component knows. Nothing re-renders, nothing is rebuilt.</p>
+</section>
+
+<section id="tenant-brand" data-part="5" data-cue="Per-tenant branding uses the same mechanism">
+  <h2>A tenant's brand is data</h2>
+  <div class="file">Sketch · not in this repo · applied after sign-in</div>
+  <pre class="code" data-lang="ts" data-mark="3">const root = document.documentElement;
+for (const [token, value] of Object.entries(tenant.brandTokens)) {
+  root.style.setProperty(token, value);   // e.g. '--cw-color-primary', '#0f766e'
+}</pre>
+  <div class="cols">
+    <div class="card legacy"><h3 class="amber">Not this</h3><p>A build per tenant. Components branching on tenant IDs.</p></div>
+    <div class="card modern"><h3>This</h3><p>Redefine the same custom properties. The components don't change.</p></div>
+  </div>
+</section>
+
+<section id="contrast" data-part="5" data-cue="There's a catch, and saying it is what makes the answer senior">
+  <h2>The catch: contrast</h2>
+  <div class="cols">
+    <div class="card"><h3>4.5 : 1</h3><p>Every text and background pair (WCAG AA)</p></div>
+    <div class="card"><h3>3 : 1</h3><p>Control borders and the focus ring (non-text contrast)</p></div>
+  </div>
+  <p style="margin-top:40px">Validate brands <span class="accent">when they're configured</span>: the tenant picks a brand color, the platform derives the text color on it, or rejects it.</p>
+</section>
+
+<section id="global-a11y" data-part="5" data-cue="The tokens file also holds the global accessibility rules">
+  <h2>Global accessibility rules</h2>
+  <div class="file">apps/web/src/app/design-system/tokens.css · condensed</div>
+  <pre class="code tight" data-lang="css" data-mark="2,7,15">/* Keyboard users get a visible ring; mouse clicks don't (that's what :focus-visible decides). */
+:focus-visible {
+  outline: var(--cw-focus-ring);
+  outline-offset: var(--cw-focus-offset);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Hidden visually, still read by screen readers. */
+.cw-visually-hidden { position: absolute !important; width: 1px; height: 1px; /* … */ }</pre>
+</section>
+
+<!-- ───────────── Primitives ───────────── -->
+<section id="button" data-part="6" data-cue="Now the primitives">
+  <h2>The button is an attribute component</h2>
+  <div class="file">apps/web/src/app/design-system/button/button.ts · excerpt</div>
+  <pre class="code tight" data-lang="ts" data-mark="2,8">@Component({
+  selector: 'button[cwButton], a[cwButton]',
+  template: '&lt;ng-content /&gt;',
+  // …
+  host: {
+    class: 'cw-button',
+    '[class.cw-button--secondary]': "variant() === 'secondary'",
+    '[attr.aria-busy]': 'busy() || null',
+  },
+})
+export class Button {
+  readonly variant = input&lt;ButtonVariant&gt;('primary');
+  readonly busy = input(false);
+}</pre>
+  <p class="small muted">Used as <span class="accent">&lt;button cwButton type="button" [busy]="…"&gt;Enroll&lt;/button&gt;</span></p>
+</section>
+
+<section id="why-attribute" data-part="6" data-cue="Why an attribute and not an element?">
+  <h2>Why an attribute, not an element?</h2>
+  <div class="cols3">
+    <div class="card modern">
+      <h3>button[cwButton]</h3>
+      <p>Keeps focus, Enter and Space, form submission, the button role, its accessible name, disabled.</p>
+    </div>
+    <div class="card legacy">
+      <h3 class="amber">&lt;cw-button&gt; → div</h3>
+      <p>Loses all of it. A sprint of key handlers and ARIA, and still a missed case.</p>
+    </div>
+    <div class="card legacy">
+      <h3 class="amber">&lt;cw-button&gt; → button</h3>
+      <p>Must forward type, form and every ARIA attribute. The API grows forever.</p>
+    </div>
+  </div>
+</section>
+
+<section id="busy" data-part="6" data-cue="The busy input sets">
+  <h2>Busy, not disabled</h2>
+  <div class="file">apps/web/src/app/design-system/button/button.ts</div>
+  <pre class="code" data-lang="ts" data-mark="4,5">/**
+ * An attribute component on the native element, …
+ *
+ * `busy` sets aria-busy instead of `disabled`: a disabled button drops focus and swallows
+ * clicks, which would hide double-submits from the code designed to absorb them (exhaustMap).
+ */</pre>
+  <div class="cols">
+    <div class="card legacy"><h3 class="amber">disabled</h3><p>Drops focus, hides why, swallows clicks</p></div>
+    <div class="card modern"><h3>aria-busy</h3><p>Focus stays; a spinner shows; the logic (lesson 03) absorbs duplicates</p></div>
+  </div>
+</section>
+
+<section id="text-field" data-part="6" data-cue="Next, design-system/text-field/text-field.ts">
+  <h2>The text field owns the wiring</h2>
+  <div class="file">apps/web/src/app/design-system/text-field/text-field.html · excerpt</div>
+  <pre class="code tight" data-lang="html" data-mark="1,6,8,9">&lt;label class="label" [for]="inputId"&gt;{{ label() }}&lt;/label&gt;
+@if (hint()) {
+  &lt;p class="hint" [id]="hintId"&gt;{{ hint() }}&lt;/p&gt;
+}
+&lt;input
+  [id]="inputId"
+  …
+  [attr.aria-describedby]="describedBy()"
+  [attr.aria-invalid]="error() ? 'true' : null"
+  …
+/&gt;
+@if (error()) {
+  &lt;p class="error" [id]="errorId"&gt;{{ error() }}&lt;/p&gt;
+}</pre>
+  <p class="small muted">A ControlValueAccessor, so it works with any Angular form. The error has no role="alert": the form's summary announces.</p>
+</section>
+
+<section id="card" data-part="6" data-cue="The card has one small detail that shows design-system thinking">
+  <h2>The page decides the heading level</h2>
+  <div class="file">apps/web/src/app/design-system/card/card.ts · condensed</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,2,3,4,5">@if (heading(); as text) {
+  @switch (headingLevel()) {
+    @case (2) { &lt;h2 class="heading"&gt;{{ text }}&lt;/h2&gt; }
+    @case (3) { &lt;h3 class="heading"&gt;{{ text }}&lt;/h3&gt; }
+    @case (4) { &lt;h4 class="heading"&gt;{{ text }}&lt;/h4&gt; }
+  }
+}
+&lt;ng-content /&gt;
+// …
+readonly heading = input&lt;string&gt;();
+readonly headingLevel = input&lt;2 | 3 | 4&gt;(2);</pre>
+  <p class="small muted">A component that hard-codes an h3 breaks the outline of every page that uses it differently.</p>
+</section>
+
+<!-- ───────────── Smart and presentational ───────────── -->
+<section id="smart-presentational" data-part="7" data-cue="Put the layers and the primitives together">
+  <h2>Smart and presentational</h2>
+  <div class="cols">
+    <div class="card"><h3>Feature pages: smart</h3><p>Inject stores and services. Know about HTTP.</p></div>
+    <div class="card"><h3>Primitives: presentational</h3><p>Inputs in, outputs out. No idea where data comes from.</p></div>
+  </div>
+</section>
+
+<section id="catalog-page" data-part="7" data-cue="Open features/catalog/catalog-page.ts to see it">
+  <h2>A feature composing primitives</h2>
+  <div class="file">apps/web/src/app/features/catalog/catalog-page.ts</div>
+  <pre class="code" data-lang="ts" data-mark="1,5,6">import { Button, Card } from '@cw/design-system';
+// …
+@Component({
+  selector: 'cw-catalog-page',
+  imports: [RouterLink, TitleCasePipe, Button, Card, MyEnrollments],
+  providers: [CatalogStore],
+  templateUrl: './catalog-page.html',
+  // …
+})
+export class CatalogPage {
+  protected readonly store = inject(CatalogStore);
+  // …
+}</pre>
+  <p class="small muted">Provided by the page, so the store lives exactly as long as the page.</p>
+</section>
+
+<section id="forms-entry" data-part="7" data-cue="One more detail shows architecture meeting performance">
+  <h2>A barrel is also a performance decision</h2>
+  <div class="file">apps/web/src/app/design-system/forms.ts</div>
+  <pre class="code tight" data-lang="ts" data-mark="1,2,3">// A separate entry point, because TextField pulls in @angular/forms (about 56 kB). Barrel
+// re-exports aren't tree-shaken here, so exporting it from index.ts would put forms in the
+// initial bundle of every page. Only the lazy login feature imports this.
+export { TextField } from './text-field/text-field';</pre>
+  <div class="file">apps/web/src/app/design-system/index.ts</div>
+  <pre class="code tight" data-lang="ts">// Form controls are exported from '@cw/design-system/forms' instead; see forms.ts.
+export { Button, type ButtonVariant } from './button/button';
+export { Card } from './card/card';
+export { LiveAnnouncer } from './live-announcer';
+export { Progress } from './progress/progress';</pre>
+  <p class="small muted">More in lesson 06.</p>
+</section>
+
+<!-- ───────────── Evolving the design system ───────────── -->
+<section id="scenarios" data-part="8" data-cue="Interviewers at this level push past the structure">
+  <h2>Three scenarios that come up again and again</h2>
+  <div class="steps">
+    <div class="step"><span class="num">1</span>Two features need the same course card</div>
+    <div class="step"><span class="num">2</span>A team wants to add a date picker</div>
+    <div class="step"><span class="num">3</span>A breaking change used in 200 places</div>
+  </div>
+</section>
+
+<section id="course-card" data-part="8" data-cue="First, two features need the same course card">
+  <h2>1 · The same course card in two features</h2>
+  <div class="cols">
+    <div class="card legacy"><h3 class="amber">Import it from catalog</h3><p>Couples two features' releases and ownership. Lint blocks it anyway.</p></div>
+    <div class="card modern"><h3>Split generic from specific</h3><p>A card with plain inputs moves into the design system. Each feature maps its own data onto it.</p></div>
+  </div>
+  <p class="muted" style="margin-top:40px">Shared behaviour, like loading a course, moves into core.</p>
+</section>
+
+<section id="date-picker" data-part="8" data-cue="Second, a team wants to add a date picker to the design system">
+  <h2>2 · Before accepting a date picker</h2>
+  <ul class="checks">
+    <li>A ControlValueAccessor: works with any Angular form</li>
+    <li>Labelled, with hint and error wiring</li>
+    <li>Fully keyboard-usable (ARIA pattern), or the native date input</li>
+    <li>Explicit about time zones</li>
+    <li>Reads only tokens</li>
+    <li>Tests, including an automated accessibility check</li>
+  </ul>
+</section>
+
+<section id="breaking-change" data-part="8" data-cue="Third, a breaking change to a component used in two hundred places">
+  <h2>3 · A breaking change used in 200 places</h2>
+  <div class="steps">
+    <div class="step on"><span class="num">1</span>New API alongside the old</div>
+    <div class="step on"><span class="num">2</span>Deprecate + lint warning</div>
+    <div class="step on"><span class="num">3</span>Codemod (Angular schematic)</div>
+    <div class="step on"><span class="num">4</span>Migrate in reviewable batches</div>
+    <div class="step on"><span class="num">5</span>Visual regression tests</div>
+    <div class="step on"><span class="num">6</span>Remove in the next major</div>
+  </div>
+  <p class="muted" style="margin-top:40px">Strangler thinking, at component scale.</p>
+</section>
+
+<section id="production" data-part="8" data-cue="What production would add is predictable">
+  <h2>What production would add</h2>
+  <ul>
+    <li>A published component library (ng-packagr)</li>
+    <li>Storybook, with interaction and accessibility tests per component</li>
+    <li>Visual regression tests</li>
+    <li>A written deprecation policy</li>
+  </ul>
+</section>
+
+<!-- ───────────── Traps ───────────── -->
+<section id="traps" data-part="9" data-cue="Wrapping a div in a component and calling it a button">
+  <h2>Traps</h2>
+  <ul class="small">
+    <li>A div in a component, called a button</li>
+    <li>Hard-coded colors inside components</li>
+    <li>A feature importing another feature "just this once"</li>
+    <li>A design system that depends on the app</li>
+    <li>Barrels treated as free</li>
+    <li>Lint rules mistaken for a dependency graph</li>
+    <li>role="alert" on every field error</li>
+  </ul>
+</section>
+
+<!-- ───────────── Interview drill ───────────── -->
+<section id="drill" data-part="10" data-cue="Let's practise">
+  <div class="kicker">Interview drill</div>
+  <h1>Five questions</h1>
+  <p class="lead">After each question, pause and answer out loud. Then compare with the model answer.</p>
+</section>
+
+<section id="q1" data-part="10" data-cue="How do you structure a large Angular application so it stays maintainable?" data-voice="interviewer">
+  <div class="kicker">Question 1 of 5</div>
+  <p class="question">How do you structure a large Angular application so it stays maintainable?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a1" data-part="10" data-cue="In layers with one-way dependencies">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>One-way layers: design system → core → shell and features</li>
+    <li>Features never import each other; shared code moves down</li>
+    <li>A public surface per layer (path alias + barrel)</li>
+    <li>Executable: lint rules per feature; CI fails on a violation</li>
+    <li>Nx tags once there's more than one app</li>
+  </ul>
+</section>
+
+<section id="q2" data-part="10" data-cue="Why is the design system's button an attribute selector, not an element?" data-voice="interviewer">
+  <div class="kicker">Question 2 of 5</div>
+  <p class="question">Why is the design system's button an attribute selector, not an element?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a2" data-part="10" data-cue="Because the native button already provides focus">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>The native button gives focus, keys, submission, role, name, disabled</li>
+    <li>An attribute component keeps all of it and adds styling</li>
+    <li>A div wrapper loses it; a button wrapper forwards attributes forever</li>
+    <li>Busy is aria-busy, so double clicks reach the logic</li>
+  </ul>
+</section>
+
+<section id="q3" data-part="10" data-cue="Two features need the same course card. Where does it go?" data-voice="interviewer">
+  <div class="kicker">Question 3 of 5</div>
+  <p class="question">Two features need the same course card. Where does it go?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a3" data-part="10" data-cue="Not into one feature for the other to import">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Never imported from one feature into another</li>
+    <li>Presentational part → design system, with plain inputs</li>
+    <li>Each feature maps its own data onto it</li>
+    <li>Shared behaviour → core</li>
+  </ul>
+</section>
+
+<section id="q4" data-part="10" data-cue="How do design tokens support per-tenant branding without a build per tenant?" data-voice="interviewer">
+  <div class="kicker">Question 4 of 5</div>
+  <p class="question">How do design tokens support per-tenant branding without a build per tenant?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a4" data-part="10" data-cue="Tokens are CSS custom properties, and components read only tokens">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>Components read only CSS custom properties</li>
+    <li>A theme is data: redefine them; no re-render, no rebuild</li>
+    <li>Dark mode already works this way; tenant brands the same</li>
+    <li>Validate contrast at configuration time</li>
+  </ul>
+</section>
+
+<section id="q5" data-part="10" data-cue="How would you roll out a breaking change to a design-system component used in two hundred places?" data-voice="interviewer">
+  <div class="kicker">Question 5 of 5</div>
+  <p class="question">How would you roll out a breaking change to a design-system component used in 200 places?</p>
+  <p class="hint">Answer out loud.</p>
+</section>
+<section id="a5" data-part="10" data-cue="Additively. Ship the new API alongside the old one">
+  <div class="kicker">Model answer</div>
+  <ul>
+    <li>New API alongside the old; deprecate the old</li>
+    <li>Lint warning for new uses; a codemod for the rest</li>
+    <li>Reviewable batches, visual regression tests</li>
+    <li>Remove in the next major, at zero warnings</li>
+  </ul>
+</section>
+
+<!-- ───────────── Recap ───────────── -->
+<template id="recap">
+  <h2>Five things to remember</h2>
+  <ol class="recap">
+    <li class="item">Large frontends fail by erosion. Architecture that isn't executable erodes.</li>
+    <li class="item">Four one-way layers. Shared code moves down, never sideways.</li>
+    <li class="item">Executable rules: a lint rule per feature, with messages that teach.</li>
+    <li class="item">Tokens make theming data. Validate contrast when a brand is configured.</li>
+    <li class="item">Primitives keep the platform's behaviour; the page decides the heading level.</li>
+  </ol>
+</template>
+<section id="recap-0" data-part="11" data-cue="Five things to remember" data-template="recap" data-show="0"></section>
+<section id="recap-1" data-part="11" data-cue="One: large frontends fail by erosion" data-template="recap" data-show="1"></section>
+<section id="recap-2" data-part="11" data-cue="Two: four layers with one-way dependencies" data-template="recap" data-show="2"></section>
+<section id="recap-3" data-part="11" data-cue="Three: make the rules executable" data-template="recap" data-show="3"></section>
+<section id="recap-4" data-part="11" data-cue="Four: tokens make theming data" data-template="recap" data-show="4"></section>
+<section id="recap-5" data-part="11" data-cue="Five: primitives keep the platform's behaviour" data-template="recap" data-show="5"></section>
+
+<section id="next" data-part="11" data-cue="In the next lesson">
+  <div class="kicker">Next</div>
+  <h1>02 · Signals and Zoneless Change Detection</h1>
+  <p class="lead">What actually triggers a render when there's no zone.js, and why Coursewright keeps its state in signals.</p>
+</section>
+
+<script src="../assets/slides.js"></script>
+</body>
+</html>
