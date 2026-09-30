@@ -1,3 +1,7 @@
 * text=auto eol=lf
 *.ico binary
 *.png binary
+
+# Instructional audio lessons and videos are stored in Git LFS.
+docs/instructional/**/*.mp3 filter=lfs diff=lfs merge=lfs -text
+docs/instructional/**/*.mp4 filter=lfs diff=lfs merge=lfs -text

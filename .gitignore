@@ -24,3 +24,7 @@ blob-report/
 !.vscode/extensions.json
 .DS_Store
 Thumbs.db
+
+# Instructional media: synthesis cache (tools/instructional-audio/generate.cs) and slide renders (tools/instructional-video/build.cs)
+tools/instructional-audio/.cache/
+tools/instructional-video/.cache/
