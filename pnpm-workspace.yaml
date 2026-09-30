@@ -1,0 +1,19 @@
+packages:
+  - apps/*
+  - contracts
+
+# Native and binary packages that need their install scripts.
+allowBuilds:
+  '@parcel/watcher': true
+  esbuild: true
+  lmdb: true
+  # Optional speed-up for msgpackr; it falls back to pure JS, and its node-gyp build fails on hosts without a C++ toolchain.
+  msgpackr-extract: false
+
+minimumReleaseAgeExclude:
+  - '@vitest/mocker@5.0.3'
+  - '@vitest/spy@5.0.3'
+  - vitest@5.0.3
+
+# pnpm 12 runs an implicit install before scripts by default; warn instead.
+verifyDepsBeforeRun: warn

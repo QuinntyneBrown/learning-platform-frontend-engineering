@@ -1,0 +1,721 @@
+openapi: 3.1.0
+info:
+  title: Coursewright BFF API
+  version: 1.0.0
+  description: |
+    The backend-for-frontend that the Coursewright web app calls. This file is the
+    source of truth: `schema.d.ts` is generated from it, the web app and the BFF both
+    import those types, and the BFF's contract tests validate real responses against it.
+
+    Conventions:
+    - Errors are RFC 9457 problem details (`application/problem+json`).
+    - Every request may carry a W3C `traceparent` header; the BFF continues that trace
+      and returns `traceparent` on the response.
+    - The tenant comes from the access token, never from the request. A resource that
+      belongs to another tenant is a 404, not a 403, so its existence doesn't leak.
+servers:
+  - url: /api
+security:
+  - bearerAuth: []
+
+tags:
+  - name: auth
+  - name: catalog
+  - name: enrollments
+  - name: jobs
+  - name: observability
+
+paths:
+  /auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      summary: Exchange a username and password for a session.
+      description: |
+        Returns a short-lived access token in the body (the client keeps it in memory only)
+        and sets a rotating refresh token in an httpOnly, SameSite=Strict cookie scoped to
+        `/api/auth`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Signed in.
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/RefreshCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      operationId: refreshSession
+      summary: Rotate the refresh cookie and issue a new access token.
+      description: |
+        Each refresh token is single-use. Presenting one that was already used revokes every
+        refresh token for that user (reuse detection), so a stolen token only works once.
+      security: []
+      responses:
+        '200':
+          description: New session.
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/RefreshCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      summary: Revoke the refresh token and clear the cookie.
+      security: []
+      responses:
+        '204':
+          description: Signed out. Always succeeds, even without a cookie.
+
+  /courses:
+    get:
+      tags: [catalog]
+      operationId: searchCourses
+      summary: Search the caller's tenant catalog.
+      description: |
+        Keyset pagination ordered by `title`, then `id`. `nextCursor` is opaque; pass it back
+        unchanged to get the next page. It is `null` on the last page.
+      parameters:
+        - name: q
+          in: query
+          description: Case-insensitive substring match on the title.
+          schema:
+            type: string
+            maxLength: 100
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        '200':
+          description: One page of results.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoursePage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /courses/{courseId}:
+    get:
+      tags: [catalog]
+      operationId: getCourse
+      summary: Get one course, with a strong ETag.
+      parameters:
+        - $ref: '#/components/parameters/CourseId'
+        - name: If-None-Match
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The course.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Course'
+        '304':
+          description: Not modified since the ETag in `If-None-Match`.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /enrollments:
+    post:
+      tags: [enrollments]
+      operationId: enroll
+      summary: Enroll the caller in a course. Idempotent per `Idempotency-Key`.
+      description: |
+        The client creates one `Idempotency-Key` per user intent and reuses it on retries.
+        A repeat with the same key and body returns the original `201` response, with
+        `Idempotency-Replayed: true`. The same key with a different body is a `422`.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 100
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnrollmentRequest'
+      responses:
+        '201':
+          description: Enrolled (or a replay of the original enrollment).
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+            Idempotency-Replayed:
+              description: Present, with the value `true`, when this is a replayed response.
+              schema:
+                type: string
+                enum: ['true']
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Enrollment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+
+  /me/enrollments:
+    get:
+      tags: [enrollments]
+      operationId: listMyEnrollments
+      summary: The caller's enrollments, newest first.
+      responses:
+        '200':
+          description: The caller's enrollments.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnrollmentList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /reports:
+    post:
+      tags: [jobs]
+      operationId: requestReport
+      summary: Start an asynchronous report export. Managers only.
+      description: |
+        Returns `202 Accepted` at once, with the job and a `Location` header. Follow progress
+        with `GET /jobs/{jobId}/events` (SSE) or by polling `GET /jobs/{jobId}`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportRequest'
+      responses:
+        '202':
+          description: Accepted and queued.
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /jobs/{jobId}:
+    get:
+      tags: [jobs]
+      operationId: getJob
+      summary: Poll a job.
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: The job's current state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /jobs/{jobId}/events:
+    get:
+      tags: [jobs]
+      operationId: streamJobEvents
+      summary: Server-sent events for one job.
+      description: |
+        Each message is `event: job` with `data:` set to a `Job` snapshot as JSON, and `id:`
+        set to an increasing sequence number. The first message is the current state. The
+        server closes the stream after a `completed` or `failed` snapshot.
+
+        Browsers' `EventSource` can't send an `Authorization` header, so the web app reads
+        this stream with `fetch` and parses it itself.
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: An event stream of `Job` snapshots.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /jobs/{jobId}/result:
+    get:
+      tags: [jobs]
+      operationId: downloadJobResult
+      summary: Download a completed report as CSV.
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: The report.
+          content:
+            text/csv:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /rum:
+    post:
+      tags: [observability]
+      operationId: reportRum
+      summary: Real-user monitoring beacon (web vitals and client errors).
+      description: |
+        Unauthenticated, because `navigator.sendBeacon` can't set headers. The BFF only logs
+        these; production would forward them to an observability backend and rate-limit.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RumBatch'
+          text/plain:
+            description: The same JSON, as `sendBeacon` sends it when given a string.
+            schema:
+              type: string
+      responses:
+        '202':
+          description: Accepted.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /health:
+    get:
+      tags: [observability]
+      operationId: health
+      summary: Liveness check.
+      security: []
+      responses:
+        '200':
+          description: Up.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                additionalProperties: false
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    CourseId:
+      name: courseId
+      in: path
+      required: true
+      schema:
+        type: string
+    JobId:
+      name: jobId
+      in: path
+      required: true
+      schema:
+        type: string
+
+  headers:
+    ETag:
+      description: Strong validator for the representation.
+      schema:
+        type: string
+    Location:
+      description: URL of the created or accepted resource.
+      schema:
+        type: string
+    RefreshCookie:
+      description: '`cw_refresh=<opaque>; Path=/api/auth; HttpOnly; SameSite=Strict` (plus `Secure` outside local dev).'
+      schema:
+        type: string
+
+  responses:
+    BadRequest:
+      description: The request is malformed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: Missing, invalid or expired credentials.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Forbidden:
+      description: Authenticated, but not allowed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: No such resource in the caller's tenant.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Conflict:
+      description: The resource's current state doesn't allow this.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    UnprocessableContent:
+      description: Well-formed, but semantically invalid.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+
+  schemas:
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          description: A URI that identifies the problem type, such as `/problems/already-enrolled`.
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        traceId:
+          type: string
+          description: The trace this error belongs to, for support and log search.
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      additionalProperties: false
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 100
+        password:
+          type: string
+          minLength: 1
+          maxLength: 200
+
+    Role:
+      type: string
+      enum: [learner, manager]
+
+    User:
+      type: object
+      required: [id, username, displayName, tenantId, tenantName, roles]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        displayName:
+          type: string
+        tenantId:
+          type: string
+        tenantName:
+          type: string
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
+
+    Session:
+      type: object
+      required: [accessToken, expiresIn, user]
+      additionalProperties: false
+      properties:
+        accessToken:
+          type: string
+        expiresIn:
+          type: integer
+          description: Seconds until the access token expires.
+        user:
+          $ref: '#/components/schemas/User'
+
+    CourseLevel:
+      type: string
+      enum: [beginner, intermediate, advanced]
+
+    CourseSummary:
+      type: object
+      required: [id, title, summary, level, durationMinutes]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        summary:
+          type: string
+        level:
+          $ref: '#/components/schemas/CourseLevel'
+        durationMinutes:
+          type: integer
+          minimum: 1
+
+    Lesson:
+      type: object
+      required: [id, title, durationMinutes]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        durationMinutes:
+          type: integer
+          minimum: 1
+
+    Course:
+      type: object
+      required: [id, title, summary, level, durationMinutes, description, lessons, updatedAt, enrolled]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        summary:
+          type: string
+        level:
+          $ref: '#/components/schemas/CourseLevel'
+        durationMinutes:
+          type: integer
+          minimum: 1
+        description:
+          type: string
+        lessons:
+          type: array
+          items:
+            $ref: '#/components/schemas/Lesson'
+        updatedAt:
+          type: string
+          format: date-time
+        enrolled:
+          type: boolean
+          description: Whether the caller is enrolled.
+
+    CoursePage:
+      type: object
+      required: [items, nextCursor]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CourseSummary'
+        nextCursor:
+          type: [string, 'null']
+
+    EnrollmentRequest:
+      type: object
+      required: [courseId]
+      additionalProperties: false
+      properties:
+        courseId:
+          type: string
+          minLength: 1
+
+    Enrollment:
+      type: object
+      required: [id, courseId, courseTitle, userId, status, enrolledAt]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        courseId:
+          type: string
+        courseTitle:
+          type: string
+        userId:
+          type: string
+        status:
+          type: string
+          enum: [active]
+        enrolledAt:
+          type: string
+          format: date-time
+          description: UTC, with an explicit offset (`Z`).
+
+    EnrollmentList:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Enrollment'
+
+    ReportRequest:
+      type: object
+      required: [type]
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          enum: [completions]
+        failAttempts:
+          type: integer
+          minimum: 0
+          maximum: 5
+          default: 0
+          description: |
+            Learning knob: the number of attempts the worker fails before it succeeds.
+            1 or 2 shows a retry with backoff; 3 or more exhausts the retries and the job
+            lands in the dead-letter list as `failed`.
+
+    JobStatus:
+      type: string
+      enum: [queued, running, completed, failed]
+
+    Job:
+      type: object
+      required: [id, type, status, progress, attempt, maxAttempts, createdAt, updatedAt, resultUrl, error]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [completions]
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        attempt:
+          type: integer
+          minimum: 0
+          description: The current or last attempt, starting at 1. 0 while queued.
+        maxAttempts:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        resultUrl:
+          type: [string, 'null']
+          description: Set when `status` is `completed`.
+        error:
+          type: [string, 'null']
+          description: Set when `status` is `failed`.
+
+    RumEvent:
+      type: object
+      required: [kind, name, url]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum: [web-vital, error]
+        name:
+          type: string
+          maxLength: 100
+          description: '`LCP`, `INP` or `CLS` for web vitals; the error name for errors.'
+        value:
+          type: number
+        rating:
+          type: string
+          enum: [good, needs-improvement, poor]
+        message:
+          type: string
+          maxLength: 2000
+        url:
+          type: string
+          maxLength: 2000
+        traceId:
+          type: string
+
+    RumBatch:
+      type: object
+      required: [events]
+      additionalProperties: false
+      properties:
+        events:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/RumEvent'

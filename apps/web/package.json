@@ -1,0 +1,44 @@
+{
+  "name": "@coursewright/web",
+  "version": "0.0.0",
+  "scripts": {
+    "ng": "ng",
+    "dev": "ng serve",
+    "start": "ng serve",
+    "build": "ng build",
+    "test": "ng test --watch=false",
+    "e2e": "playwright test",
+    "lint": "ng lint"
+  },
+  "private": true,
+  "dependencies": {
+    "@angular/common": "^22.2.0",
+    "@angular/compiler": "^22.2.0",
+    "@angular/core": "^22.2.0",
+    "@angular/forms": "^22.2.0",
+    "@angular/platform-browser": "^22.2.0",
+    "@angular/router": "^22.2.0",
+    "@ngrx/signals": "^22.0.1",
+    "rxjs": "~7.8.0",
+    "tslib": "^2.3.0",
+    "web-vitals": "^6.2.2"
+  },
+  "devDependencies": {
+    "@angular-eslint/builder": "22.5.0",
+    "@angular/build": "^22.2.0",
+    "@angular/cli": "^22.2.0",
+    "@angular/compiler-cli": "^22.2.0",
+    "@axe-core/playwright": "^4.13.0",
+    "@coursewright/contracts": "workspace:*",
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.63.0",
+    "angular-eslint": "22.5.0",
+    "eslint": "^10.9.1",
+    "jsdom": "^30.0.0",
+    "prettier": "^3.8.1",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "8.69.0",
+    "vitest": "^5.0.3"
+  },
+  "description": "Coursewright web app: Angular 22, zoneless, standalone."
+}

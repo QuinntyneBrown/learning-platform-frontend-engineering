@@ -1,0 +1,20 @@
+{
+  "name": "@coursewright/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The BFF's REST contract. openapi.yaml is hand-written and reviewed; schema.d.ts is generated from it.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./schema.d.ts"
+    },
+    "./openapi.yaml": "./openapi.yaml"
+  },
+  "scripts": {
+    "generate": "openapi-typescript openapi.yaml --output schema.d.ts"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.13.0",
+    "typescript": "^5.9.3"
+  }
+}
