@@ -185,8 +185,6 @@ paths:
         '201':
           description: Enrolled (or a replay of the original enrollment).
           headers:
-            Location:
-              $ref: '#/components/headers/Location'
             Idempotency-Replayed:
               description: Present, with the value `true`, when this is a replayed response.
               schema:

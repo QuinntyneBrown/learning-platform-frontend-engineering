@@ -611,7 +611,6 @@ export interface operations {
             /** @description Enrolled (or a replay of the original enrollment). */
             201: {
                 headers: {
-                    Location: components["headers"]["Location"];
                     /** @description Present, with the value `true`, when this is a replayed response. */
                     "Idempotency-Replayed"?: "true";
                     [name: string]: unknown;
